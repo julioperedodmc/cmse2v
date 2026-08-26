@@ -16,7 +16,7 @@ class WalletController extends Controller
     public function downloadHistory(Request $request)
     {
         $user = $request->user();
-        
+
         // Manual auth for direct link downloads if sanctum fails
         if (!$user && $request->has('token')) {
             $accessToken = \Laravel\Sanctum\PersonalAccessToken::findToken($request->query('token'));
@@ -115,7 +115,7 @@ class WalletController extends Controller
         }
 
         $transactions = $wallet->transactions()->latest()->paginate(50);
-        
+
         return response()->json($transactions);
     }
 
@@ -327,7 +327,7 @@ class WalletController extends Controller
     public function downloadInvoice(Request $request, int $transactionId)
     {
         $user = $request->user();
-        
+
         // Manual auth for direct link downloads if sanctum fails
         if (!$user && $request->has('token')) {
             $accessToken = \Laravel\Sanctum\PersonalAccessToken::findToken($request->query('token'));
@@ -342,7 +342,7 @@ class WalletController extends Controller
 
         $wallet = Wallet::where('user_id', $user->id)->first();
         if (!$wallet) {
-             return response()->json(['message' => 'Billetera no encontrada'], 404);
+            return response()->json(['message' => 'Billetera no encontrada'], 404);
         }
 
         $tx = \App\Models\WalletTransaction::where('id', $transactionId)

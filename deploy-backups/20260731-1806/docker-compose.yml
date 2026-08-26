@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  steve-cms-nginx:
+    image: nginx:alpine
+    container_name: steve-cms-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./nginx/ssl:/etc/nginx/ssl
+    networks:
+      - default
+      - steve-java_default
+
+  steve-cms-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.cms
+    container_name: steve-cms-app
+    restart: unless-stopped
+    volumes:
+      - .:/app
+    networks:
+      default:
+      steve-java_default:
+    ports:
+      - "8080:8080"
+    command: /bin/bash -c "php artisan serve --host=0.0.0.0 --port=8080"
+
+  steve-cms-redis:
+    image: redis:alpine
+    container_name: steve-cms-redis
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    networks:
+      - default
+      - steve-java_default
+
+  steve-monitor-daemon:
+    build:
+      context: .
+      dockerfile: Dockerfile.cms
+    container_name: steve-monitor-daemon
+    restart: unless-stopped
+    volumes:
+      - .:/app
+    networks:
+      - default
+      - steve-java_default
+    command: php artisan steve:monitor-transactions --daemon
+
+volumes:
+  redis-data:
+    external: true
+
+networks:
+  default:
+    name: steve-cms_default
+  steve-java_default:
+    external: true

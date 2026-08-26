@@ -1,3 +1,4 @@
+<?php
 use Illuminate\Support\Facades\Schedule;
 
 Artisan::command('inspire', function () {

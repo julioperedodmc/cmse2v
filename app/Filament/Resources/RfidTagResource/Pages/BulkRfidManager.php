@@ -60,13 +60,13 @@ class BulkRfidManager extends Page
                                 TextInput::make('card_price')
                                     ->label('Precio de la Tarjeta (BOB)')
                                     ->numeric()
-                                    ->default(20)
+                                    ->default(1)
                                     ->required()
                                     ->live(),
                                 TextInput::make('card_discount')
                                     ->label('Descuento de Tarjeta (BOB)')
                                     ->numeric()
-                                    ->default(20)
+                                    ->default(0)
                                     ->required()
                                     ->live()
                                     ->helperText('Si el descuento es igual al precio, el cliente no paga por la tarjeta, pero aparece en la factura.'),
@@ -106,6 +106,23 @@ class BulkRfidManager extends Page
 
                         Section::make('Detalles del Usuario Corporativo / Empresa')
                             ->schema([
+                                Select::make('company_id')
+                                    ->label('Empresa')
+                                    ->options(Company::all()->pluck('name', 'id'))
+                                    ->searchable()
+                                    ->preload()
+                                    ->live()
+                                    ->afterStateUpdated(function ($state, callable $set) {
+                                        if ($state) {
+                                            $company = Company::find($state);
+                                            if ($company) {
+                                                $set('new_user_name', $company->name);
+                                                $set('new_user_email', $company->email);
+                                                $set('billing_razon_social', $company->name);
+                                                $set('billing_document', $company->tax_id);
+                                            }
+                                        }
+                                    }),
                                 TextInput::make('new_user_name')
                                     ->label('Nombre del Usuario/Flota')
                                     ->required()

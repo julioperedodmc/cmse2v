@@ -57,7 +57,7 @@ class RfidTagResource extends Resource
                     ->maxLength(8)
                     ->helperText('Standard 4-byte UID hex (8 characters).')
                     // Auto-clean colons and non-alphanumeric chars on blur
-                    ->afterStateUpdated(fn ($state, $set) => $set('tag_code', substr(strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $state)), -8)))
+                    ->afterStateUpdated(fn($state, $set) => $set('tag_code', substr(strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $state)), -8)))
                     ->live(onBlur: true),
                 Forms\Components\Select::make('user_id')
                     ->relationship('user', 'name')
@@ -67,7 +67,7 @@ class RfidTagResource extends Resource
                     ->default(null),
                 Forms\Components\TextInput::make('name')
                     ->maxLength(255)
-                    ->disabled(fn ($record) => $record?->is_virtual)
+                    ->disabled(fn($record) => $record?->is_virtual)
                     ->default(null),
                 Forms\Components\Select::make('product_id')
                     ->label('Producto')
@@ -112,8 +112,8 @@ class RfidTagResource extends Resource
                 Tables\Columns\TextColumn::make('is_virtual')
                     ->label('Tipo')
                     ->badge()
-                    ->formatStateUsing(fn ($state) => $state ? 'Virtual' : 'Física')
-                    ->color(fn ($state) => $state ? 'info' : 'gray'),
+                    ->formatStateUsing(fn($state) => $state ? 'Virtual' : 'Física')
+                    ->color(fn($state) => $state ? 'info' : 'gray'),
                 Tables\Columns\TextColumn::make('expires_at')
                     ->label('Fecha de Expiración')
                     ->date()
@@ -135,11 +135,11 @@ class RfidTagResource extends Resource
                     ->label('Recarga Manual')
                     ->icon('heroicon-o-currency-dollar')
                     ->color('warning')
-                    ->visible(fn () => auth()->user()?->hasAnyRole(['super_admin', 'staff_admin', 'sales']))
+                    ->visible(fn() => auth()->user()?->hasAnyRole(['super_admin', 'staff_admin', 'sales']))
                     ->form([
                         Forms\Components\Select::make('payment_method')
                             ->label('Método de Pago')
-                            ->options(fn (callable $get) => $get('emit_invoice') ? [
+                            ->options(fn(callable $get) => $get('emit_invoice') ? [
                                 'manual' => 'Efectivo / Manual (Caja)',
                                 'libelula' => 'Pasarela de Pago (Libélula QR/Tarjeta)',
                                 'credit' => 'A Crédito (Activa saldo de inmediato)',
@@ -192,7 +192,7 @@ class RfidTagResource extends Resource
                             ->live()
                             ->afterStateUpdated(function (Forms\Set $set, $state, Forms\Get $get) {
                                 if (!$get('custom_description')) {
-                                    $set('description', 'Recarga de tarjeta RFID - Bs ' . number_format((float)$state, 2));
+                                    $set('description', 'Recarga de tarjeta RFID - Bs ' . number_format((float) $state, 2));
                                 }
                             }),
                         Forms\Components\TextInput::make('description')
@@ -200,7 +200,7 @@ class RfidTagResource extends Resource
                             ->required()
                             ->maxLength(255)
                             ->default('Recarga de tarjeta RFID - Bs 10.00')
-                            ->disabled(fn (Forms\Get $get) => !$get('custom_description'))
+                            ->disabled(fn(Forms\Get $get) => !$get('custom_description'))
                             ->dehydrated(),
                         Forms\Components\TextInput::make('global_discount')
                             ->label('Descuento Global (BOB)')
@@ -216,7 +216,7 @@ class RfidTagResource extends Resource
                     ])
                     ->action(function (RfidTag $record, array $data): void {
                         $amount = round((float) $data['amount'], 2);
-                        
+
                         if ($data['emit_invoice'] && !$record->user_id) {
                             Notification::make()
                                 ->title('Error de Facturación')
@@ -230,7 +230,7 @@ class RfidTagResource extends Resource
                             $isManual = ($data['payment_method'] === 'manual');
                             $isCredit = ($data['payment_method'] === 'credit');
                             $shouldIncrementBalance = $isManual || $isCredit;
-                            
+
                             // 1. Update Tag balance ONLY IF it's a manual cash payment or a credit payment (balance is active immediately)
                             if ($shouldIncrementBalance) {
                                 if (!$record->is_virtual) {
@@ -272,7 +272,7 @@ class RfidTagResource extends Resource
                                 // 3. Handle Invoicing if requested OR if we need a payment link
                                 if ($data['emit_invoice'] || (!$isManual && !$isCredit)) {
                                     $service = app(\App\Services\LibelulaPaymentService::class);
-                                    
+
                                     $productCode = \App\Models\Product::find($data['product_id'] ?? null)?->siat_product_code ?? '1';
                                     $lineItems = [
                                         [
@@ -296,7 +296,7 @@ class RfidTagResource extends Resource
                                         'line_items' => $lineItems,
                                         'is_credit' => $isCredit,
                                     ], $isManual, (float) ($data['global_discount'] ?? 0)); // isPaid = $isManual, + discount
-
+            
                                     if ($result['success']) {
                                         if ($isCredit) {
                                             Notification::make()
@@ -350,7 +350,12 @@ class RfidTagResource extends Resource
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
                     Tables\Actions\DeleteBulkAction::make(),
+                    \pxlrbt\FilamentExcel\Actions\Tables\ExportBulkAction::make(),
                 ]),
+            ])
+            ->headerActions([
+                \pxlrbt\FilamentExcel\Actions\Tables\ExportAction::make()
+                    ->label('Exportar Excel'),
             ]);
     }
 

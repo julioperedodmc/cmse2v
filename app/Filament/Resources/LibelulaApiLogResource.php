@@ -46,6 +46,7 @@ class LibelulaApiLogResource extends Resource
                             ->disabled(),
                         Forms\Components\DateTimePicker::make('created_at')
                             ->label('Fecha y Hora')
+                            ->timezone('America/La_Paz')
                             ->disabled(),
                     ])->columns(2),
 
@@ -71,6 +72,7 @@ class LibelulaApiLogResource extends Resource
                 Tables\Columns\TextColumn::make('created_at')
                     ->label('Fecha')
                     ->dateTime()
+                    ->timezone('America/La_Paz')
                     ->sortable()
                     ->searchable(),
                 Tables\Columns\TextColumn::make('method')

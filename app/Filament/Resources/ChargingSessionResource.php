@@ -123,7 +123,12 @@ class ChargingSessionResource extends Resource
                 Tables\Columns\TextColumn::make('user.name')
                     ->label('Client')
                     ->description(fn(ChargingSession $record): string => $record->user->email ?? '')
-                    ->searchable()
+                    ->searchable(query: function (Builder $query, string $search): Builder {
+                        return $query->whereHas('user', function (Builder $q) use ($search) {
+                            $q->where('name', 'like', "%{$search}%")
+                              ->orWhere('email', 'like', "%{$search}%");
+                        });
+                    })
                     ->sortable(),
 
                 Tables\Columns\TextColumn::make('status')
@@ -171,11 +176,17 @@ class ChargingSessionResource extends Resource
                     ->label('Stopped')
                     ->dateTime('d M H:i', 'America/La_Paz')
                     ->sortable()
-                    ->toggleable(isToggledHiddenByDefault: true),
+                    ->toggleable(),
             ])
             ->defaultSort('start_time', 'desc')
             ->filters([
-                //
+                Tables\Filters\SelectFilter::make('status')
+                    ->options([
+                        'Active' => 'Activo (Active)',
+                        'Completed' => 'Completado (Completed)',
+                        'Faulted' => 'Fallido (Faulted)',
+                    ])
+                    ->label('Estado de Sesión'),
             ])
             ->actions([
                 Tables\Actions\EditAction::make(),
@@ -190,7 +201,12 @@ class ChargingSessionResource extends Resource
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
                     Tables\Actions\DeleteBulkAction::make(),
+                    \pxlrbt\FilamentExcel\Actions\Tables\ExportBulkAction::make(),
                 ]),
+            ])
+            ->headerActions([
+                \pxlrbt\FilamentExcel\Actions\Tables\ExportAction::make()
+                    ->label('Exportar Excel'),
             ]);
     }
 

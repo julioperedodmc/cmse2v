@@ -33,7 +33,7 @@ class WalletResource extends Resource
                             ->preload()
                             ->required()
                             ->unique(ignoreRecord: true), // One wallet per user
-                        
+
                         Forms\Components\Select::make('currency')
                             ->options([
                                 'BOB' => 'BOB (Boliviano)',
@@ -46,7 +46,7 @@ class WalletResource extends Resource
                             ->label('Current Balance')
                             ->numeric()
                             ->default(0)
-                            ->prefix('$') 
+                            ->prefix('$')
                             ->disabled() // NEW: Disable direct editing
                             ->dehydrated(false), // Ensure it's not sent in save request
                     ])->columns(3),
@@ -64,8 +64,8 @@ class WalletResource extends Resource
                             ->numeric()
                             ->default(0)
                             ->prefix('$')
-                            ->visible(fn (Forms\Get $get) => $get('is_postpaid')) // Hide if not postpaid
-                            ->required(fn (Forms\Get $get) => $get('is_postpaid')), // Required only if postpaid
+                            ->visible(fn(Forms\Get $get) => $get('is_postpaid')) // Hide if not postpaid
+                            ->required(fn(Forms\Get $get) => $get('is_postpaid')), // Required only if postpaid
                     ])->columns(2),
             ]);
     }
@@ -87,7 +87,7 @@ class WalletResource extends Resource
                     ->searchable()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('balance')
-                    ->money(fn ($record) => $record->currency)
+                    ->money(fn($record) => $record->currency)
                     ->sortable()
                     ->weight('bold'),
                 Tables\Columns\TextColumn::make('currency')
@@ -96,7 +96,7 @@ class WalletResource extends Resource
                     ->boolean()
                     ->label('Post-Paid'),
                 Tables\Columns\TextColumn::make('credit_limit')
-                    ->money(fn ($record) => $record->currency)
+                    ->money(fn($record) => $record->currency)
                     ->label('Limit'),
                 Tables\Columns\TextColumn::make('updated_at')
                     ->dateTime()
@@ -121,7 +121,7 @@ class WalletResource extends Resource
                             ->default(10)
                             ->live()
                             ->afterStateUpdated(function (Forms\Set $set, $state) {
-                                $set('description', 'Manual Top-up - Bs ' . number_format((float)$state, 2));
+                                $set('description', 'Manual Top-up - Bs ' . number_format((float) $state, 2));
                             }),
                         Forms\Components\TextInput::make('description')
                             ->label('Reason / Description')
@@ -142,7 +142,7 @@ class WalletResource extends Resource
                     ])
                     ->action(function (Wallet $record, array $data) {
                         $amount = round((float) $data['amount'], 2);
-                        
+
                         DB::transaction(function () use ($record, $amount, $data) {
                             $record->balance = round(((float) $record->balance) + $amount, 2);
                             $record->save();
@@ -204,7 +204,7 @@ class WalletResource extends Resource
                     ->action(function (Wallet $record, array $data) {
                         $service = new \App\Services\LibelulaPaymentService();
                         $result = $service->createPayment($record, $data['amount'], 'Recarga Wallet', [], false, (float) ($data['global_discount'] ?? 0));
-                        
+
                         if ($result['success']) {
                             // Redirect to Payment URL
                             // Filament Action typically stays on page, but we can open URL
@@ -213,7 +213,7 @@ class WalletResource extends Resource
                                 ->body('Redirecting to Libélula...')
                                 ->success()
                                 ->send();
-                                
+
                             // Open URL in new tab using Javascript or redirect
                             // Since this is server side, we can return a redirect? 
                             // Filament actions can assume redirect returns.
