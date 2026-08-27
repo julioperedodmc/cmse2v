@@ -37,7 +37,7 @@ class LibelulaDebugger extends Page implements HasForms
             'nombre_cliente' => auth()->user()->name,
             'razon_social' => 'Usuario de Prueba',
             'numero_documento' => '1234567',
-            'placa_vehiculo' => '5318FPG',
+            'placa_vehiculo' => '1111ABC',
             'codigo_producto' => '1',
             'concepto' => 'Factura de prueba Sector 31',
             'monto' => 10,
@@ -58,7 +58,7 @@ class LibelulaDebugger extends Page implements HasForms
                         TextInput::make('numero_documento')->required()->label('NIT / CI'),
                         TextInput::make('placa_vehiculo')
                             ->required()
-                            ->default('5318FPG')
+                            ->default('1111ABC')
                             ->label('Placa del Vehículo (Metadato Sector 31)'),
                     ])->columns(2),
 

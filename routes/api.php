@@ -102,6 +102,7 @@ Route::prefix('v1/mobile')->group(function () {
         Route::prefix('vehicles')->group(function () {
             Route::get('/', [VehicleController::class, 'index']);
             Route::post('/', [VehicleController::class, 'store']);
+              Route::put('/{vehicle}', [VehicleController::class, 'update']);
             Route::delete('/{vehicle}', [VehicleController::class, 'destroy']);
         });
 

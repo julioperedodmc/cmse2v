@@ -101,7 +101,7 @@ class LibelulaPaymentService
             ?? $invoiceData['placa'] 
             ?? $invoiceData['placa_vehiculo'] 
             ?? $user?->vehicles()?->latest()?->first()?->plate 
-            ?? '5318FPG';
+            ?? '1111ABC';
 
         $payload = [
             'appkey' => $apiKey,
@@ -596,7 +596,7 @@ class LibelulaPaymentService
         $plate = $tx->metadata['vehicle_plate'] 
             ?? $tx->metadata['placa'] 
             ?? $user?->vehicles()?->latest()?->first()?->plate 
-            ?? '5318FPG';
+            ?? '1111ABC';
 
         $payload = [
             'appkey' => $this->apiKey,
@@ -727,7 +727,7 @@ class LibelulaPaymentService
             'lineas_metadatos' => [
                 [
                     'nombre' => 'placa Vehiculo',
-                    'dato' => (string) ($payloadData['placa_vehiculo'] ?? '5318FPG'),
+                    'dato' => (string) ($payloadData['placa_vehiculo'] ?? '1111ABC'),
                 ]
             ],
             'pago_realizado' => true,

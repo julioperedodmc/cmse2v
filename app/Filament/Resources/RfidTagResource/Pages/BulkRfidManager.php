@@ -154,6 +154,12 @@ class BulkRfidManager extends Page
                                     ->default(fn() => \App\Models\SystemSetting::get()->invoice_on_bulk_creation)
                                     ->live(),
                                 
+                                TextInput::make('vehicle_plate')
+                                    ->label('Placa de Vehículo')
+                                    ->default('1111ABC')
+                                    ->helperText('Placa a reportar en la factura del lote. Se permite ingresar "0000000" u otro formato de placa.')
+                                    ->visible(fn (callable $get) => $get('emit_invoice')),
+                                
                                 Select::make('payment_method')
                                     ->label('Método de Pago')
                                     ->options(fn (callable $get) => $get('emit_invoice') ? [
@@ -339,13 +345,14 @@ class BulkRfidManager extends Page
                             
                             // For manual and credit, we want to emit invoice immediately (isPaid = true for manual, but for credit we pass is_credit = true)
                             $libService = app(\App\Services\LibelulaPaymentService::class);
-                            $result = $libService->createPayment($wallet, $tagTotal, "Carga inicial RFID $code", [
-                                'emite_factura' => true,
-                                'internal_usage_tx' => true,
-                                'transaction_id' => $tx->id,
-                                'line_items' => $tagLineItems,
-                                'is_credit' => $isCredit,
-                            ], $isManual, 0);
+                             $result = $libService->createPayment($wallet, $tagTotal, "Carga inicial RFID $code", [
+                                 'emite_factura' => true,
+                                 'internal_usage_tx' => true,
+                                 'transaction_id' => $tx->id,
+                                 'line_items' => $tagLineItems,
+                                 'is_credit' => $isCredit,
+                                 'vehicle_plate' => $inputData['vehicle_plate'] ?? '1111ABC',
+                             ], $isManual, 0);
 
                             if (!$result['success']) {
                                 throw new \Exception("Libélula (Tag $code): " . ($result['detail'] ?? $result['message']));
@@ -387,13 +394,14 @@ class BulkRfidManager extends Page
                 // Emit invoice if checked. For credit, we want to invoice immediately but keep status as credit.
                 if ($inputData['emit_invoice'] ?? false) {
                     $libService = app(\App\Services\LibelulaPaymentService::class);
-                    $result = $libService->createPayment($wallet, $masterTx->amount, $masterTx->description, [
-                        'emite_factura' => true,
-                        'internal_usage_tx' => true,
-                        'transaction_id' => $masterTx->id,
-                        'line_items' => $allLineItems,
-                        'is_credit' => $isCredit,
-                    ], $isManual, $globalDiscount);
+                     $result = $libService->createPayment($wallet, $masterTx->amount, $masterTx->description, [
+                         'emite_factura' => true,
+                         'internal_usage_tx' => true,
+                         'transaction_id' => $masterTx->id,
+                         'line_items' => $allLineItems,
+                         'is_credit' => $isCredit,
+                         'vehicle_plate' => $inputData['vehicle_plate'] ?? '1111ABC',
+                     ], $isManual, $globalDiscount);
 
                     if (!$result['success']) {
                         throw new \Exception("Libélula (Lote): " . ($result['detail'] ?? $result['message']));
