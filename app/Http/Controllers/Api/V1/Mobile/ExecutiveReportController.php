@@ -123,11 +123,54 @@ class ExecutiveReportController extends Controller
         $totalEnergyCost = $kpiData->total_energy_cost ?? 0;
         $avgBobPerKwh = $totalEnergyKwh > 0 ? round($totalEnergyCost / $totalEnergyKwh, 2) : 0;
 
-        // Calculate total recharged amount (Total Facturado App Billetera - Metodo LIBELULA)
+        // Calculate total recharged amount (Total Facturado App Billetera)
+        // Calculates Libélula and all other recharge processes, excluding users without NIT or CI (and temporary RFID users)
         $rechargesQuery = DB::table('wallet_transactions')
             ->where('type', 'RECHARGE')
-            ->where('payment_method', 'LIKE', 'LIBELULA%')
-            ->where('status', 'Completed');
+            ->where('status', 'Completed')
+            ->whereIn('user_id', function($q) {
+                $q->select('id')
+                  ->from('users')
+                  ->where('is_admin', 0)
+                  ->whereNotExists(function($query) {
+                      $query->select(DB::raw(1))
+                            ->from('model_has_roles')
+                            ->join('roles', 'model_has_roles.role_id', '=', 'roles.id')
+                            ->whereColumn('model_has_roles.model_id', 'users.id')
+                            ->where('model_has_roles.model_type', 'App\\Models\\User')
+                            ->where('roles.name', '<>', 'client');
+                  })
+                  ->whereNotNull('billing_document')
+                  ->where('billing_document', '<>', '')
+                  ->where('billing_document', '<>', '0')
+                  ->where('name', 'NOT LIKE', 'Usuario RFID%')
+                  ->where('email', 'NOT LIKE', '%@evce.temp');
+            });
+
+        // Calculate total excluded recharge amount (Completed recharges for users without NIT/CI/temp RFID)
+        $excludedRechargesQuery = DB::table('wallet_transactions')
+            ->where('type', 'RECHARGE')
+            ->where('status', 'Completed')
+            ->whereIn('user_id', function($q) {
+                $q->select('id')
+                  ->from('users')
+                  ->where('is_admin', 0)
+                  ->whereNotExists(function($query) {
+                      $query->select(DB::raw(1))
+                            ->from('model_has_roles')
+                            ->join('roles', 'model_has_roles.role_id', '=', 'roles.id')
+                            ->whereColumn('model_has_roles.model_id', 'users.id')
+                            ->where('model_has_roles.model_type', 'App\\Models\\User')
+                            ->where('roles.name', '<>', 'client');
+                  })
+                  ->where(function($sub) {
+                      $sub->whereNull('billing_document')
+                          ->orWhere('billing_document', '')
+                          ->orWhere('billing_document', '0')
+                          ->orWhere('name', 'LIKE', 'Usuario RFID%')
+                          ->orWhere('email', 'LIKE', '%@evce.temp');
+                  });
+            });
 
         // Calculate total recharged amount for enterprise/dealerships (payment_method CREDITO, status PENDING, and valid invoice_url)
         $creditQuery = DB::table('wallet_transactions')
@@ -145,19 +188,24 @@ class ExecutiveReportController extends Controller
             $carbonMonth = Carbon::parse($month . '-01');
             $rechargesQuery->whereRaw("DATE($localTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
                            ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
+            $excludedRechargesQuery->whereRaw("DATE($localTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
+                                   ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
             $creditQuery->whereRaw("DATE($localTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
                         ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
         } else {
             if ($startDate) {
                 $rechargesQuery->whereRaw("DATE($localTimeExpr) >= ?", [$startDate]);
+                $excludedRechargesQuery->whereRaw("DATE($localTimeExpr) >= ?", [$startDate]);
                 $creditQuery->whereRaw("DATE($localTimeExpr) >= ?", [$startDate]);
             }
             if ($endDate) {
                 $rechargesQuery->whereRaw("DATE($localTimeExpr) <= ?", [$endDate]);
+                $excludedRechargesQuery->whereRaw("DATE($localTimeExpr) <= ?", [$endDate]);
                 $creditQuery->whereRaw("DATE($localTimeExpr) <= ?", [$endDate]);
             }
         }
         $totalFacturado = (float) $rechargesQuery->sum('amount');
+        $totalExcluido = (float) $excludedRechargesQuery->sum('amount');
         $totalFacturadoCredito = (float) $creditQuery->sum('amount');
 
         $uniqueClients = (clone $completedQuery)->distinct('user_id')->count('user_id');
@@ -219,6 +267,7 @@ class ExecutiveReportController extends Controller
                 'total_energy_mwh' => $totalEnergyMwh,
                 'total_revenue_bob' => round($totalEnergyCost, 2),
                 'total_facturado_bob' => round($totalFacturado, 2),
+                'total_excluido_bob' => round($totalExcluido, 2),
                 'total_facturado_credito_bob' => round($totalFacturadoCredito, 2),
                 'avg_bob_per_kwh' => $avgBobPerKwh,
                 'unique_clients' => $uniqueClients,
@@ -594,13 +643,91 @@ class ExecutiveReportController extends Controller
 
         $rechargesQuery = DB::table('wallet_transactions')
             ->where('type', 'RECHARGE')
-            ->where('status', 'Completed');
+            ->where('status', 'Completed')
+            ->whereIn('user_id', function($q) {
+                $q->select('id')
+                  ->from('users')
+                  ->where('is_admin', 0)
+                  ->whereNotExists(function($query) {
+                      $query->select(DB::raw(1))
+                            ->from('model_has_roles')
+                            ->join('roles', 'model_has_roles.role_id', '=', 'roles.id')
+                            ->whereColumn('model_has_roles.model_id', 'users.id')
+                            ->where('model_has_roles.model_type', 'App\\Models\\User')
+                            ->where('roles.name', '<>', 'client');
+                  })
+                  ->whereNotNull('billing_document')
+                  ->where('billing_document', '<>', '')
+                  ->where('billing_document', '<>', '0')
+                  ->where('name', 'NOT LIKE', 'Usuario RFID%')
+                  ->where('email', 'NOT LIKE', '%@evce.temp');
+            });
+
+        $excludedRechargesQuery = DB::table('wallet_transactions')
+            ->where('type', 'RECHARGE')
+            ->where('status', 'Completed')
+            ->whereIn('user_id', function($q) {
+                $q->select('id')
+                  ->from('users')
+                  ->where('is_admin', 0)
+                  ->whereNotExists(function($query) {
+                      $query->select(DB::raw(1))
+                            ->from('model_has_roles')
+                            ->join('roles', 'model_has_roles.role_id', '=', 'roles.id')
+                            ->whereColumn('model_has_roles.model_id', 'users.id')
+                            ->where('model_has_roles.model_type', 'App\\Models\\User')
+                            ->where('roles.name', '<>', 'client');
+                  })
+                  ->where(function($sub) {
+                      $sub->whereNull('billing_document')
+                          ->orWhere('billing_document', '')
+                          ->orWhere('billing_document', '0')
+                          ->orWhere('name', 'LIKE', 'Usuario RFID%')
+                          ->orWhere('email', 'LIKE', '%@evce.temp');
+                  });
+            });
 
         $refundsQuery = DB::table('wallet_transactions')
-            ->whereIn('type', ['REFUND', 'CREDIT']);
+            ->whereIn('type', ['REFUND', 'CREDIT'])
+            ->whereIn('user_id', function($q) {
+                $q->select('id')
+                  ->from('users')
+                  ->where('is_admin', 0)
+                  ->whereNotExists(function($query) {
+                      $query->select(DB::raw(1))
+                            ->from('model_has_roles')
+                            ->join('roles', 'model_has_roles.role_id', '=', 'roles.id')
+                            ->whereColumn('model_has_roles.model_id', 'users.id')
+                            ->where('model_has_roles.model_type', 'App\\Models\\User')
+                            ->where('roles.name', '<>', 'client');
+                  })
+                  ->whereNotNull('billing_document')
+                  ->where('billing_document', '<>', '')
+                  ->where('billing_document', '<>', '0')
+                  ->where('name', 'NOT LIKE', 'Usuario RFID%')
+                  ->where('email', 'NOT LIKE', '%@evce.temp');
+            });
 
         $sessionsQuery = DB::table('charging_sessions')
-            ->where('status', 'Completed');
+            ->where('status', 'Completed')
+            ->whereIn('user_id', function($q) {
+                $q->select('id')
+                  ->from('users')
+                  ->where('is_admin', 0)
+                  ->whereNotExists(function($query) {
+                      $query->select(DB::raw(1))
+                            ->from('model_has_roles')
+                            ->join('roles', 'model_has_roles.role_id', '=', 'roles.id')
+                            ->whereColumn('model_has_roles.model_id', 'users.id')
+                            ->where('model_has_roles.model_type', 'App\\Models\\User')
+                            ->where('roles.name', '<>', 'client');
+                  })
+                  ->whereNotNull('billing_document')
+                  ->where('billing_document', '<>', '')
+                  ->where('billing_document', '<>', '0')
+                  ->where('name', 'NOT LIKE', 'Usuario RFID%')
+                  ->where('email', 'NOT LIKE', '%@evce.temp');
+            });
 
         // Apply date filters
         $localTimeExpr = 'DATE_SUB(created_at, INTERVAL 4 HOUR)';
@@ -608,6 +735,8 @@ class ExecutiveReportController extends Controller
             $carbonMonth = Carbon::parse($month . '-01');
             $rechargesQuery->whereRaw("DATE($localTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
                            ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
+            $excludedRechargesQuery->whereRaw("DATE($localTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
+                                   ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
             $refundsQuery->whereRaw("DATE($localTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
                          ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
             
@@ -617,6 +746,7 @@ class ExecutiveReportController extends Controller
         } else {
             if ($startDate) {
                 $rechargesQuery->whereRaw("DATE($localTimeExpr) >= ?", [$startDate]);
+                $excludedRechargesQuery->whereRaw("DATE($localTimeExpr) >= ?", [$startDate]);
                 $refundsQuery->whereRaw("DATE($localTimeExpr) >= ?", [$startDate]);
                 
                 $sessTimeExpr = 'DATE_SUB(start_time, INTERVAL 4 HOUR)';
@@ -624,6 +754,7 @@ class ExecutiveReportController extends Controller
             }
             if ($endDate) {
                 $rechargesQuery->whereRaw("DATE($localTimeExpr) <= ?", [$endDate]);
+                $excludedRechargesQuery->whereRaw("DATE($localTimeExpr) <= ?", [$endDate]);
                 $refundsQuery->whereRaw("DATE($localTimeExpr) <= ?", [$endDate]);
                 
                 $sessTimeExpr = 'DATE_SUB(start_time, INTERVAL 4 HOUR)';
@@ -633,6 +764,7 @@ class ExecutiveReportController extends Controller
 
         // Calculate KPI totals
         $totalRecharged = $rechargesQuery->sum('amount');
+        $totalExcluido = $excludedRechargesQuery->sum('amount');
         $totalChargeConsumed = $sessionsQuery->sum('total_cost');
         $totalRefunds = $refundsQuery->sum('amount');
         $netWalletBalance = $totalRecharged - $totalChargeConsumed + $totalRefunds;
@@ -791,8 +923,98 @@ class ExecutiveReportController extends Controller
             ')
             ->groupBy('user_id');
 
-        // Query all users
-        $topConsumers = DB::table('users')
+        $mapUserBalances = function ($c) {
+            $is_temp_rfid_user = (str_starts_with($c->client_name, 'Usuario RFID') || str_contains($c->client_email, '@evce.temp'));
+
+            if ($is_temp_rfid_user) {
+                $rfid_recharges_before = (float) $c->gen_recharges_before;
+                $rfid_recharges_during = (float) $c->gen_recharges_during;
+                $rfid_recharges_after = (float) $c->gen_recharges_after;
+
+                $rfid_refunds_before = (float) $c->gen_refunds_before;
+                $rfid_refunds_during = (float) $c->gen_refunds_during;
+                $rfid_refunds_after = (float) $c->gen_refunds_after;
+            } else {
+                $rfid_recharges_before = (float) $c->rfid_recharges_before;
+                $rfid_recharges_during = (float) $c->rfid_recharges_during;
+                $rfid_recharges_after = (float) $c->rfid_recharges_after;
+
+                $rfid_refunds_before = (float) $c->rfid_refunds_before;
+                $rfid_refunds_during = (float) $c->rfid_refunds_during;
+                $rfid_refunds_after = (float) $c->rfid_refunds_after;
+            }
+
+            $rfid_consumption_before = (float) $c->rfid_consumption_before;
+            $rfid_consumption_during = (float) $c->rfid_consumption_during;
+            $rfid_consumption_after = (float) $c->rfid_consumption_after;
+
+            $rfid_current_balance = (float) $c->rfid_current_balance;
+
+            // Reconstruct opening balance
+            $rfid_opening_balance = $rfid_recharges_before + $rfid_refunds_before - $rfid_consumption_before;
+            if ($rfid_opening_balance < 0) {
+                $rfid_opening_balance = 0.00;
+            }
+            
+            // Determine if there is pre-existing historical balance not tracked by transactions
+            $total_lifetime_transactions = ($rfid_recharges_before + $rfid_recharges_during + $rfid_recharges_after) +
+                                            ($rfid_refunds_before + $rfid_refunds_during + $rfid_refunds_after) -
+                                            ($rfid_consumption_before + $rfid_consumption_during + $rfid_consumption_after);
+            
+            $historical_discrepancy = abs($rfid_current_balance - $total_lifetime_transactions);
+            $has_untraced_history = $historical_discrepancy > 2.0; // 2 BOB tolerance
+            
+            $audit_basis = 'complete';
+            if ($has_untraced_history) {
+                $audit_basis = 'historical_balance_missing';
+            }
+
+            $rfid_expected_closing_balance = $rfid_opening_balance + $rfid_recharges_during + $rfid_refunds_during - $rfid_consumption_during;
+            $rfid_closing_balance = $rfid_current_balance - ($rfid_recharges_after + $rfid_refunds_after - $rfid_consumption_after);
+            if ($rfid_closing_balance < 0) {
+                $rfid_closing_balance = 0.00;
+            }
+
+            $is_corporate_client = ($c->company_id !== null);
+
+            return [
+                'user_id' => $c->user_id,
+                'client_name' => $c->client_name,
+                'client_email' => $c->client_email,
+                'is_corporate_client' => $is_corporate_client,
+                'is_temp_rfid_user' => $is_temp_rfid_user,
+                'sessions_count' => (int) $c->sessions_count,
+                'total_energy_kwh' => round((float) $c->total_energy_kwh, 1),
+                'total_spent_bob' => round((float) $c->total_spent_bob, 2),
+                'total_recharged_bob' => round((float) $c->total_recharged_bob, 2),
+                'total_refunds_bob' => round((float) $c->total_refunds_bob, 2),
+                'rfid_balance_bob' => round($rfid_current_balance, 2),
+                'physical_tags_count' => (int) $c->physical_tags_count,
+                'virtual_tags_count' => (int) $c->virtual_tags_count,
+                'app_balance_bob' => round((float) $c->app_balance_bob, 2),
+                
+                // Reconciliation fields
+                'rfid_opening_balance' => round($rfid_opening_balance, 2),
+                'rfid_recharges_period' => round($rfid_recharges_during, 2),
+                'rfid_refunds_period' => round($rfid_refunds_during, 2),
+                'rfid_consumption_period' => round($rfid_consumption_during, 2),
+                'rfid_closing_balance' => round($rfid_closing_balance, 2),
+                'rfid_expected_closing_balance' => round($rfid_expected_closing_balance, 2),
+                'audit_basis' => $audit_basis,
+            ];
+        };
+
+        // Query all users (Base Query Builder)
+        $baseQueryBuilder = DB::table('users')
+            ->where('users.is_admin', 0)
+            ->whereNotExists(function($query) {
+                $query->select(DB::raw(1))
+                      ->from('model_has_roles')
+                      ->join('roles', 'model_has_roles.role_id', '=', 'roles.id')
+                      ->whereColumn('model_has_roles.model_id', 'users.id')
+                      ->where('model_has_roles.model_type', 'App\\Models\\User')
+                      ->where('roles.name', '<>', 'client');
+            })
             ->leftJoin('wallets', 'users.id', '=', 'wallets.user_id')
             ->leftJoinSub($legacySessionsSub, 'sessions', 'users.id', '=', 'sessions.user_id')
             ->leftJoinSub($legacyRechargesSub, 'recharges', 'users.id', '=', 'recharges.user_id')
@@ -837,98 +1059,38 @@ class ExecutiveReportController extends Controller
                 COALESCE(sess.consumption_before, 0) as rfid_consumption_before,
                 COALESCE(sess.consumption_during, 0) as rfid_consumption_during,
                 COALESCE(sess.consumption_after, 0) as rfid_consumption_after
-            ')
-            ->get()
-            ->map(function ($c) {
-                $is_temp_rfid_user = (str_starts_with($c->client_name, 'Usuario RFID') || str_contains($c->client_email, '@evce.temp'));
+            ');
 
-                if ($is_temp_rfid_user) {
-                    $rfid_recharges_before = (float) $c->gen_recharges_before;
-                    $rfid_recharges_during = (float) $c->gen_recharges_during;
-                    $rfid_recharges_after = (float) $c->gen_recharges_after;
+        $topConsumersQuery = (clone $baseQueryBuilder)
+            ->whereNotNull('users.billing_document')
+            ->where('users.billing_document', '<>', '')
+            ->where('users.billing_document', '<>', '0')
+            ->where('users.name', 'NOT LIKE', 'Usuario RFID%')
+            ->where('users.email', 'NOT LIKE', '%@evce.temp');
 
-                    $rfid_refunds_before = (float) $c->gen_refunds_before;
-                    $rfid_refunds_during = (float) $c->gen_refunds_during;
-                    $rfid_refunds_after = (float) $c->gen_refunds_after;
-                } else {
-                    $rfid_recharges_before = (float) $c->rfid_recharges_before;
-                    $rfid_recharges_during = (float) $c->rfid_recharges_during;
-                    $rfid_recharges_after = (float) $c->rfid_recharges_after;
-
-                    $rfid_refunds_before = (float) $c->rfid_refunds_before;
-                    $rfid_refunds_during = (float) $c->rfid_refunds_during;
-                    $rfid_refunds_after = (float) $c->rfid_refunds_after;
-                }
-
-                $rfid_consumption_before = (float) $c->rfid_consumption_before;
-                $rfid_consumption_during = (float) $c->rfid_consumption_during;
-                $rfid_consumption_after = (float) $c->rfid_consumption_after;
-
-                $rfid_current_balance = (float) $c->rfid_current_balance;
-
-                // Reconstruct opening balance
-                $rfid_opening_balance = $rfid_recharges_before + $rfid_refunds_before - $rfid_consumption_before;
-                if ($rfid_opening_balance < 0) {
-                    $rfid_opening_balance = 0.00;
-                }
-                
-                // Determine if there is pre-existing historical balance not tracked by transactions
-                $total_lifetime_transactions = ($rfid_recharges_before + $rfid_recharges_during + $rfid_recharges_after) +
-                                                ($rfid_refunds_before + $rfid_refunds_during + $rfid_refunds_after) -
-                                                ($rfid_consumption_before + $rfid_consumption_during + $rfid_consumption_after);
-                
-                $historical_discrepancy = abs($rfid_current_balance - $total_lifetime_transactions);
-                $has_untraced_history = $historical_discrepancy > 2.0; // 2 BOB tolerance
-
-                $audit_basis = 'complete';
-                if ($has_untraced_history) {
-                    $audit_basis = 'historical_balance_missing';
-                }
-
-                $rfid_expected_closing_balance = $rfid_opening_balance + $rfid_recharges_during + $rfid_refunds_during - $rfid_consumption_during;
-                $rfid_closing_balance = $rfid_current_balance - ($rfid_recharges_after + $rfid_refunds_after - $rfid_consumption_after);
-                if ($rfid_closing_balance < 0) {
-                    $rfid_closing_balance = 0.00;
-                }
-
-                $is_corporate_client = ($c->company_id !== null);
-
-                return [
-                    'user_id' => $c->user_id,
-                    'client_name' => $c->client_name,
-                    'client_email' => $c->client_email,
-                    'is_corporate_client' => $is_corporate_client,
-                    'is_temp_rfid_user' => $is_temp_rfid_user,
-                    'sessions_count' => (int) $c->sessions_count,
-                    'total_energy_kwh' => round((float) $c->total_energy_kwh, 1),
-                    'total_spent_bob' => round((float) $c->total_spent_bob, 2),
-                    'total_recharged_bob' => round((float) $c->total_recharged_bob, 2),
-                    'total_refunds_bob' => round((float) $c->total_refunds_bob, 2),
-                    'rfid_balance_bob' => round($rfid_current_balance, 2),
-                    'physical_tags_count' => (int) $c->physical_tags_count,
-                    'virtual_tags_count' => (int) $c->virtual_tags_count,
-                    'app_balance_bob' => round((float) $c->app_balance_bob, 2),
-                    
-                    // Reconciliation fields
-                    'rfid_opening_balance' => round($rfid_opening_balance, 2),
-                    'rfid_recharges_period' => round($rfid_recharges_during, 2),
-                    'rfid_refunds_period' => round($rfid_refunds_during, 2),
-                    'rfid_consumption_period' => round($rfid_consumption_during, 2),
-                    'rfid_closing_balance' => round($rfid_closing_balance, 2),
-                    'rfid_expected_closing_balance' => round($rfid_expected_closing_balance, 2),
-                    'audit_basis' => $audit_basis,
-                ];
+        $excludedConsumersQuery = (clone $baseQueryBuilder)
+            ->where(function($q) {
+                $q->whereNull('users.billing_document')
+                  ->orWhere('users.billing_document', '')
+                  ->orWhere('users.billing_document', '0')
+                  ->orWhere('users.name', 'LIKE', 'Usuario RFID%')
+                  ->orWhere('users.email', 'LIKE', '%@evce.temp');
             });
+
+        $topConsumers = $topConsumersQuery->get()->map($mapUserBalances);
+        $excludedConsumers = $excludedConsumersQuery->get()->map($mapUserBalances);
 
         return response()->json([
             'success' => true,
             'balance_summary' => [
                 'total_recharged_bob' => round((float) $totalRecharged, 2),
+                'total_excluido_bob' => round((float) $totalExcluido, 2),
                 'total_charge_consumed_bob' => round((float) $totalChargeConsumed, 2),
                 'total_refunds_bob' => round((float) $totalRefunds, 2),
                 'net_wallet_balance_bob' => round((float) $netWalletBalance, 2),
             ],
             'top_consuming_clients' => $topConsumers,
+            'excluded_clients' => $excludedConsumers,
         ]);
     }
 
