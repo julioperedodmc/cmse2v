@@ -16,7 +16,7 @@
             </div>
         </div>
 
-        <!-- Mismatch Table -->
+        <!-- Mismatch Table Card -->
         <div class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl shadow-sm overflow-hidden">
             <div class="p-6 border-b border-gray-200 dark:border-gray-800 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Clientes con Discrepancias</h3>
@@ -28,12 +28,13 @@
                         <option value="all">Todas las discrepancias</option>
                         <option value="recharge_unapplied">Patrón 1: Recargas no aplicadas (Dif Tx)</option>
                         <option value="sessions_unbilled">Patrón 2: Sesiones no cobradas (Cobro vs Sesión)</option>
+                        <option value="sap_risk">Patrón 3: Riesgo Mapeo SAP / Empresa (SACI / Corporativo)</option>
                     </select>
                     <div class="w-full sm:w-72">
                         <input 
                             type="search" 
                             wire:model.live.debounce.300ms="search" 
-                            placeholder="Buscar por nombre, email o ID..." 
+                            placeholder="Buscar por nombre, email, NIT o ID..." 
                             class="w-full text-sm rounded-lg border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-950 dark:text-white focus:ring-primary-500 focus:border-primary-500 shadow-sm"
                         />
                     </div>
@@ -92,9 +93,21 @@
                         @forelse($discrepancies as $c)
                             <tr class="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
                                 <td class="p-4">
-                                    <div class="font-medium text-gray-900 dark:text-white">{{ $c['name'] }}</div>
+                                    <div class="font-medium text-gray-900 dark:text-white flex items-center gap-2">
+                                        <span>{{ $c['name'] }}</span>
+                                        @if(!empty($c['company_name']))
+                                            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-info-50 text-info-700 dark:bg-info-900/30 dark:text-info-400" title="Empresa Corporativa">
+                                                🏢 {{ $c['company_name'] }}
+                                            </span>
+                                        @endif
+                                    </div>
                                     <div class="text-xs text-gray-500">{{ $c['email'] }}</div>
-                                    <div class="text-xs text-gray-400">ID: {{ $c['user_id'] }}</div>
+                                    <div class="text-xs text-gray-400 flex items-center gap-2 mt-0.5">
+                                        <span>ID: {{ $c['user_id'] }}</span>
+                                        @if(!empty($c['billing_document']))
+                                            <span>• NIT/CI: {{ $c['billing_document'] }}</span>
+                                        @endif
+                                    </div>
                                 </td>
                                 <td class="p-4 text-right font-semibold text-gray-900 dark:text-white">
                                     {{ number_format($c['wallet_balance'], 2) }} BOB
@@ -151,6 +164,9 @@
                         @endforelse
                     </tbody>
                 </table>
+            </div>
+        </div>
+
         <!-- Modal for Transactions -->
         <x-filament::modal id="transactions-modal" width="6xl" display-close-button="true">
             <x-slot name="heading">

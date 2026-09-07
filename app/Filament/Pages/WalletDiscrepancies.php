@@ -88,37 +88,55 @@ class WalletDiscrepancies extends Page
         $userName = str_replace(' ', '_', $this->selectedUserName);
 
         $headers = [
-            "Content-type" => "text/csv; charset=UTF-8",
-            "Content-Disposition" => "attachment; filename=transacciones_{$userName}_{$userId}.csv",
-            "Pragma" => "no-cache",
-            "Cache-Control" => "must-revalidate, post-check=0, pre-check=0",
-            "Expires" => "0"
+            'Content-Type' => 'text/csv',
+            'Content-Disposition' => "attachment; filename=\"transacciones_usuario_{$userId}_{$userName}.csv\"",
+            'Pragma' => 'no-cache',
+            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
+            'Expires' => '0',
         ];
 
-        $callback = function() use ($userId) {
+        $callback = function () use ($userId) {
             $file = fopen('php://output', 'w');
-            fputs($file, chr(0xEF).chr(0xBB).chr(0xBF)); // BOM for Excel UTF-8
             
-            fputcsv($file, ['ID Transaccion', 'Fecha', 'Tipo', 'Monto (BOB)', 'Saldo Despues (BOB)', 'Estado', 'Descripcion', 'Metodo de Pago', 'Referencia']);
+            // Add UTF-8 BOM for Excel compatibility
+            fputs($file, "\xEF\xBB\xBF");
 
-            $txs = DB::table('wallet_transactions')
+            // Header row
+            fputcsv($file, [
+                'ID Transacción',
+                'Fecha / Hora',
+                'Tipo',
+                'Monto (BOB)',
+                'Saldo Posterior (BOB)',
+                'Estado',
+                'Método de Pago',
+                'Descripción',
+                'Referencia',
+                'ID Pago Externo',
+                'Factura / Recibo',
+            ]);
+
+            DB::table('wallet_transactions')
                 ->where('user_id', $userId)
                 ->orderBy('created_at', 'desc')
-                ->get();
+                ->chunk(200, function ($transactions) use ($file) {
+                    foreach ($transactions as $tx) {
+                        fputcsv($file, [
+                            $tx->id,
+                            $tx->created_at,
+                            $tx->type,
+                            number_format((float)$tx->amount, 2, '.', ''),
+                            number_format((float)($tx->balance_after ?? $tx->balance ?? 0), 2, '.', ''),
+                            $tx->status,
+                            $tx->payment_method ?? 'APP',
+                            $tx->description ?? '',
+                            $tx->reference_id ?? $tx->reference ?? '',
+                            $tx->external_payment_id ?? '',
+                            $tx->invoice_number ?? $tx->bank_receipt_number ?? '',
+                        ]);
+                    }
+                });
 
-            foreach ($txs as $tx) {
-                fputcsv($file, [
-                    $tx->id,
-                    $tx->created_at,
-                    $tx->type,
-                    $tx->amount,
-                    $tx->balance_after ?? $tx->balance ?? '',
-                    $tx->status,
-                    $tx->description,
-                    $tx->payment_method,
-                    $tx->reference_id ?? $tx->reference ?? '',
-                ]);
-            }
             fclose($file);
         };
 
@@ -134,20 +152,26 @@ class WalletDiscrepancies extends Page
             ->pluck('user_id')
             ->toArray();
 
-        // Fetch non-corporate users without physical RFID tags and exclude temp RFID users
+        // Fetch real users only (exclude temp RFID system users)
         $usersQuery = DB::table('users')
             ->leftJoin('wallets', 'users.id', '=', 'wallets.user_id')
-            ->whereNull('users.company_id')
-            ->whereNotIn('users.id', $usersWithPhysicalTags)
+            ->leftJoin('companies', 'users.company_id', '=', 'companies.id')
             ->where('users.email', 'NOT LIKE', '%@evce.temp')
             ->where('users.name', 'NOT LIKE', 'Usuario RFID%');
+
+        if ($this->filterPattern !== 'sap_risk') {
+            $usersQuery->whereNull('users.company_id')
+                ->whereNotIn('users.id', $usersWithPhysicalTags);
+        }
 
         if (!empty($this->search)) {
             $searchVal = '%' . $this->search . '%';
             $usersQuery->where(function ($q) use ($searchVal) {
                 $q->where('users.name', 'LIKE', $searchVal)
                   ->orWhere('users.email', 'LIKE', $searchVal)
-                  ->orWhere('users.id', 'LIKE', $searchVal);
+                  ->orWhere('users.id', 'LIKE', $searchVal)
+                  ->orWhere('users.billing_document', 'LIKE', $searchVal)
+                  ->orWhere('companies.name', 'LIKE', $searchVal);
             });
         }
 
@@ -155,9 +179,24 @@ class WalletDiscrepancies extends Page
                 'users.id as user_id',
                 'users.name as client_name',
                 'users.email as client_email',
+                'users.billing_document',
+                'users.billing_razon_social',
+                'users.company_id',
+                'companies.name as company_name',
+                'companies.tax_id as company_tax_id',
                 'wallets.balance as wallet_balance'
             )
             ->get();
+
+        // Pre-fetch all corporate tax IDs once
+        $companyTaxIds = DB::table('companies')
+            ->whereNotNull('tax_id')
+            ->where('tax_id', '<>', '')
+            ->pluck('tax_id')
+            ->map(fn($t) => preg_replace('/[^0-9]/', '', (string) $t))
+            ->filter()
+            ->values()
+            ->toArray();
 
         $discrepancies = [];
 
@@ -209,13 +248,32 @@ class WalletDiscrepancies extends Page
             $hasCostDiscrepancy = $costDiscrepancy > 0.05;
             $hasSessionMismatch = $sessionMismatch > 0.05;
 
+            // Real SAP Mapping Discrepancy Detection:
+            $hasTransactions = ($recharges > 0 || $charges != 0 || $sessionsCost > 0);
+            
+            // Discrepancy: User WITHOUT company but has a corporate NIT (like SACI 1029831027) in billing_document
+            $docClean = preg_replace('/[^0-9]/', '', (string) ($user->billing_document ?? ''));
+            $hasCorporateNitOverlap = false;
+            if (empty($user->company_id) && !empty($docClean) && strlen($docClean) >= 5) {
+                foreach ($companyTaxIds as $cTaxId) {
+                    if ($cTaxId !== '' && (str_contains($cTaxId, $docClean) || str_contains($docClean, $cTaxId) || str_contains($cTaxId, substr($docClean, 0, 9)))) {
+                        $hasCorporateNitOverlap = true;
+                        break;
+                    }
+                }
+            }
+
+            $hasSapRisk = $hasTransactions && ($hasCorporateNitOverlap || !empty($user->company_id));
+
             $matchesFilter = false;
             if ($this->filterPattern === 'all') {
-                $matchesFilter = $hasTxMismatch || $hasSessionMismatch || $hasCostDiscrepancy;
+                $matchesFilter = $hasTxMismatch || $hasSessionMismatch || $hasCostDiscrepancy || $hasSapRisk;
             } elseif ($this->filterPattern === 'recharge_unapplied') {
                 $matchesFilter = $hasTxMismatch;
             } elseif ($this->filterPattern === 'sessions_unbilled') {
                 $matchesFilter = $hasCostDiscrepancy;
+            } elseif ($this->filterPattern === 'sap_risk') {
+                $matchesFilter = $hasSapRisk;
             }
 
             if ($matchesFilter) {
@@ -223,6 +281,12 @@ class WalletDiscrepancies extends Page
                     'user_id' => $userId,
                     'name' => $user->client_name,
                     'email' => $user->client_email,
+                    'billing_document' => $user->billing_document,
+                    'billing_razon_social' => $user->billing_razon_social,
+                    'company_id' => $user->company_id,
+                    'company_name' => $user->company_name,
+                    'company_tax_id' => $user->company_tax_id,
+                    'has_sap_risk' => $hasSapRisk,
                     'wallet_balance' => $walletBalance,
                     'total_recharged' => $recharges,
                     'total_charged_tx' => $charges,
@@ -240,7 +304,6 @@ class WalletDiscrepancies extends Page
         // Sort discrepancies array
         usort($discrepancies, function ($a, $b) {
             $col = $this->sortColumn;
-            // Map virtual column name to array keys
             if ($col === 'name') {
                 $valA = $a['name'] ?? '';
                 $valB = $b['name'] ?? '';
