@@ -121,14 +121,20 @@ class WalletResource extends Resource
                             ->default(10)
                             ->live()
                             ->afterStateUpdated(function (Forms\Set $set, $state) {
-                                $set('description', 'Manual Top-up - Bs ' . number_format((float) $state, 2));
+                                $settings = \App\Models\SystemSetting::get();
+                                $product = $settings->product_recharge_id ? \App\Models\Product::find($settings->product_recharge_id) : null;
+                                $set('description', $product?->name ?? ('Recarga de Saldo - Bs ' . number_format((float) $state, 2)));
                             }),
                         Forms\Components\TextInput::make('description')
                             ->label('Reason / Description')
                             ->placeholder('e.g. Promotion, Adjustment, Cash Deposit')
                             ->required()
                             ->maxLength(255)
-                            ->default('Manual Top-up - Bs 10.00'),
+                            ->default(function () {
+                                $settings = \App\Models\SystemSetting::get();
+                                $product = $settings->product_recharge_id ? \App\Models\Product::find($settings->product_recharge_id) : null;
+                                return $product?->name ?? 'Recarga de Saldo';
+                            }),
                         Forms\Components\TextInput::make('global_discount')
                             ->label('Descuento Global (BOB)')
                             ->numeric()
@@ -203,7 +209,10 @@ class WalletResource extends Resource
                     ])
                     ->action(function (Wallet $record, array $data) {
                         $service = new \App\Services\LibelulaPaymentService();
-                        $result = $service->createPayment($record, $data['amount'], 'Recarga Wallet', [], false, (float) ($data['global_discount'] ?? 0));
+                        $settings = \App\Models\SystemSetting::get();
+                        $product = $settings->product_recharge_id ? \App\Models\Product::find($settings->product_recharge_id) : null;
+                        $desc = $product?->name ?? 'Recarga de Saldo';
+                        $result = $service->createPayment($record, $data['amount'], $desc, [], false, (float) ($data['global_discount'] ?? 0));
 
                         if ($result['success']) {
                             // Redirect to Payment URL

@@ -233,10 +233,14 @@ class WalletController extends Controller
 
         \Illuminate\Support\Facades\Log::error('DEBUG: LIBELULA START', ['amount' => $request->input('amount'), 'user_id' => $user->id]);
 
+        $settings = \App\Models\SystemSetting::get();
+        $rechargeProduct = $settings->product_recharge_id ? \App\Models\Product::find($settings->product_recharge_id) : null;
+        $defaultDescription = $rechargeProduct?->name ?? 'Recarga de Saldo';
+
         $result = $libelula->createPayment(
             $wallet,
             round((float) $request->input('amount'), 2),
-            $request->input('description', 'Recarga Wallet'),
+            $request->input('description') ?: $defaultDescription,
             [
                 'razon_social' => $request->input('razon_social') ?: $user->billing_razon_social,
                 'documento' => $request->input('documento') ?: $user->billing_document,

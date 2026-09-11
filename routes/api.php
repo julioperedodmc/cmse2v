@@ -87,6 +87,10 @@ Route::prefix('v1/mobile')->group(function () {
             Route::get('/{session}/invoice', [ChargingSessionController::class, 'downloadInvoice']);
         });
 
+        // Direct shortcuts for Mobile App
+        Route::post('/fcm-token', [AuthController::class, 'updateFcmToken']);
+        Route::get('/notifications', [NotificationController::class, 'index']);
+
         // 4. PROFILE MODULE (User & Notifications)
         Route::prefix('profile')->group(function () {
             Route::get('/', [AuthController::class, 'profile']);

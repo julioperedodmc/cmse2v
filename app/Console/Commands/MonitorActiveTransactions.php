@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Models\Wallet;
 use App\Models\WalletTransaction;
 use App\Models\ChargingSession;
+use App\Models\ChargingSessionNotification;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -178,14 +179,13 @@ class MonitorActiveTransactions extends Command
                 if ($isCompleted) {
                     $session->stop_soc = (int) $latestSoc->value;
                 }
-                
-                // SoC Notification Logic
-                if (!$isCompleted && $session->user_id && $tariff && is_null($session->soc_notification_sent_at)) {
-                    $targetSoc = (int) ($tariff->target_soc ?? 80);
-                    if ($session->current_soc >= $targetSoc) {
-                        $this->sendSocNotification($session, $tariff);
-                    }
-                }
+            } elseif ($isCompleted && !is_null($session->stop_soc)) {
+                $session->current_soc = $session->stop_soc;
+            }
+
+            // SoC Notification Logic (80% and 95%)
+            if ($session->user_id && !is_null($session->current_soc)) {
+                $this->checkAndSendSocNotifications($session, $tariff);
             }
 
             $currentPower = 0;
@@ -229,6 +229,11 @@ class MonitorActiveTransactions extends Command
             $session->total_energy_kwh = $consumedKwh;
             $session->meter_stop = $currentWh;
             $session->save();
+
+            // Notify user when charging completes
+            if ($isCompleted && $session->user_id) {
+                $this->checkAndSendCompletionNotification($session, $station);
+            }
 
             // --- Real-time Sync to Firebase ---
             try {
@@ -283,36 +288,149 @@ class MonitorActiveTransactions extends Command
         }
     }
 
-    private function sendSocNotification(ChargingSession $session, Tariff $tariff)
+    private function checkAndSendSocNotifications(ChargingSession $session, ?Tariff $tariff = null): void
     {
         $user = $session->user;
-        if (!$user) return;
-
-        $soc = $session->current_soc;
-        $minutes = (int) ($tariff->free_minutes ?? 0);
-        
-        $defaultMsg = "Tu vehículo ha llegado al {$soc}% de carga. Tienes {$minutes} minutos de cortesía para retirarlo sin cargos adicionales por parqueo.";
-        $customMsg = $tariff->soc_reached_message;
-
-        if ($customMsg) {
-            $msg = str_replace(['{soc}', '{minutes}'], [$soc, $minutes], $customMsg);
-        } else {
-            $msg = $defaultMsg;
+        if (!$user) {
+            return;
         }
 
-        try {
-            $user->notify(new \App\Notifications\GeneralNotification(
-                'Carga Alcanzada',
-                $msg,
-                ['type' => 'SOC_REACHED', 'session_id' => $session->id, 'soc' => $soc]
-            ));
-            
-            $session->soc_notification_sent_at = now();
-            $session->save();
-            
-            $this->info("📧 SoC Notification sent to User #{$user->id} for Session #{$session->id} ({$soc}%)");
-        } catch (\Throwable $e) {
-            Log::error("Failed to send SoC notification", ['error' => $e->getMessage()]);
+        $soc = (int) $session->current_soc;
+        $target80 = (int) ($tariff->target_soc ?? 80);
+
+        // 1. Notificación al 80% (o SOC objetivo de la tarifa)
+        if ($soc >= $target80) {
+            $alreadySent80 = false;
+            try {
+                $alreadySent80 = ChargingSessionNotification::where('charging_session_id', $session->id)
+                    ->where('type', 'SOC_80')
+                    ->exists();
+            } catch (\Throwable $e) {
+                $alreadySent80 = !is_null($session->soc_notification_sent_at);
+            }
+
+            if (!$alreadySent80) {
+                try {
+                    $msg80 = !empty($tariff?->soc_reached_message)
+                        ? str_replace(['{soc}', '{minutes}'], [(string)$soc, '15'], $tariff->soc_reached_message)
+                        : "Tu vehículo ha alcanzado el {$target80}% de carga. Por favor verifique el estado de su carga.";
+
+                    $user->notify(new \App\Notifications\GeneralNotification(
+                        "Carga al {$target80}%",
+                        $msg80,
+                        ['type' => 'SOC_80', 'session_id' => $session->id, 'soc' => $soc]
+                    ));
+
+                    try {
+                        ChargingSessionNotification::create([
+                            'charging_session_id' => $session->id,
+                            'user_id' => $user->id,
+                            'type' => 'SOC_80',
+                            'sent_at' => now(),
+                            'data' => ['soc' => $soc],
+                        ]);
+                    } catch (\Throwable $e) {
+                        // Table may be pending migration, safe to continue
+                    }
+
+                    // Actualizar campo histórico
+                    if (is_null($session->soc_notification_sent_at)) {
+                        $session->update(['soc_notification_sent_at' => now()]);
+                    }
+
+                    $this->info("📧 SoC {$target80}% Notification sent to User #{$user->id} for Session #{$session->id} ({$soc}%)");
+                } catch (\Throwable $e) {
+                    Log::error("Failed to send 80% SoC notification", ['error' => $e->getMessage(), 'session_id' => $session->id]);
+                }
+            }
+        }
+
+        // 2. Notificación al 95%
+        if ($soc >= 95) {
+            $alreadySent95 = false;
+            try {
+                $alreadySent95 = ChargingSessionNotification::where('charging_session_id', $session->id)
+                    ->where('type', 'SOC_95')
+                    ->exists();
+            } catch (\Throwable $e) {
+                $alreadySent95 = false;
+            }
+
+            if (!$alreadySent95) {
+                try {
+                    $msg95 = "Tu vehículo ha alcanzado el 95% de carga. La sesión está próxima a completarse.";
+
+                    $user->notify(new \App\Notifications\GeneralNotification(
+                        'Carga al 95%',
+                        $msg95,
+                        ['type' => 'SOC_95', 'session_id' => $session->id, 'soc' => $soc]
+                    ));
+
+                    try {
+                        ChargingSessionNotification::create([
+                            'charging_session_id' => $session->id,
+                            'user_id' => $user->id,
+                            'type' => 'SOC_95',
+                            'sent_at' => now(),
+                            'data' => ['soc' => $soc],
+                        ]);
+                    } catch (\Throwable $e) {
+                        // Safe ignore
+                    }
+
+                    $this->info("📧 SoC 95% Notification sent to User #{$user->id} for Session #{$session->id} ({$soc}%)");
+                } catch (\Throwable $e) {
+                    Log::error("Failed to send 95% SoC notification", ['error' => $e->getMessage(), 'session_id' => $session->id]);
+                }
+            }
+        }
+    }
+
+    private function checkAndSendCompletionNotification(ChargingSession $session, ?Station $station = null): void
+    {
+        $user = $session->user;
+        if (!$user) {
+            return;
+        }
+
+        $alreadySentCompleted = ChargingSessionNotification::where('charging_session_id', $session->id)
+            ->where('type', 'COMPLETED')
+            ->exists();
+
+        if (!$alreadySentCompleted) {
+            try {
+                $stationName = $station?->name ?? ($session->station?->name ?? 'Estación de Carga');
+                $kwh = number_format((float) $session->total_energy_kwh, 2);
+                $cost = number_format((float) $session->total_cost, 2);
+
+                $user->notify(new \App\Notifications\GeneralNotification(
+                    'Carga finalizada',
+                    "Tu carga en {$stationName} ha finalizado. Consumo: {$kwh} kWh | Total: Bs {$cost}. Ya puedes desconectar tu vehículo.",
+                    [
+                        'type' => 'CHARGING_COMPLETED',
+                        'session_id' => $session->id,
+                        'kwh' => (float) $session->total_energy_kwh,
+                        'total_cost' => (float) $session->total_cost,
+                        'station_id' => $session->station_id,
+                    ]
+                ));
+
+                ChargingSessionNotification::create([
+                    'charging_session_id' => $session->id,
+                    'user_id' => $user->id,
+                    'type' => 'COMPLETED',
+                    'sent_at' => now(),
+                    'data' => [
+                        'kwh' => (float) $session->total_energy_kwh,
+                        'total_cost' => (float) $session->total_cost,
+                        'currency' => $session->currency ?? 'BOB',
+                    ],
+                ]);
+
+                $this->info("📧 Completion Notification sent to User #{$user->id} for Session #{$session->id}");
+            } catch (\Throwable $e) {
+                Log::error("Failed to send Completion notification", ['error' => $e->getMessage(), 'session_id' => $session->id]);
+            }
         }
     }
 }

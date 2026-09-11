@@ -55,7 +55,7 @@ class ExecutiveReportController extends Controller
         if ($month) {
             $carbonMonth = Carbon::parse($month . '-01');
             $query->whereRaw("DATE($localTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
-                  ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
+                ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
         } else {
             if ($startDate) {
                 $query->whereRaw("DATE($localTimeExpr) >= ?", [$startDate]);
@@ -88,9 +88,9 @@ class ExecutiveReportController extends Controller
         if ($connectorType) {
             $query->whereExists(function ($q) use ($connectorType) {
                 $q->select(DB::raw(1))
-                  ->from('connectors')
-                  ->whereColumn('connectors.id', 'charging_sessions.connector_id')
-                  ->where('connectors.type', $connectorType);
+                    ->from('connectors')
+                    ->whereColumn('connectors.id', 'charging_sessions.connector_id')
+                    ->where('connectors.type', $connectorType);
             });
         }
 
@@ -128,48 +128,48 @@ class ExecutiveReportController extends Controller
         $rechargesQuery = DB::table('wallet_transactions')
             ->where('type', 'RECHARGE')
             ->where('status', 'Completed')
-            ->whereIn('user_id', function($q) {
+            ->whereIn('user_id', function ($q) {
                 $q->select('id')
-                  ->from('users')
-                  ->where('is_admin', 0)
-                  ->whereNotExists(function($query) {
-                      $query->select(DB::raw(1))
+                    ->from('users')
+                    ->where('is_admin', 0)
+                    ->whereNotExists(function ($query) {
+                        $query->select(DB::raw(1))
                             ->from('model_has_roles')
                             ->join('roles', 'model_has_roles.role_id', '=', 'roles.id')
                             ->whereColumn('model_has_roles.model_id', 'users.id')
                             ->where('model_has_roles.model_type', 'App\\Models\\User')
                             ->where('roles.name', '<>', 'client');
-                  })
-                  ->whereNotNull('billing_document')
-                  ->where('billing_document', '<>', '')
-                  ->where('billing_document', '<>', '0')
-                  ->where('name', 'NOT LIKE', 'Usuario RFID%')
-                  ->where('email', 'NOT LIKE', '%@evce.temp');
+                    })
+                    ->whereNotNull('billing_document')
+                    ->where('billing_document', '<>', '')
+                    ->where('billing_document', '<>', '0')
+                    ->where('name', 'NOT LIKE', 'Usuario RFID%')
+                    ->where('email', 'NOT LIKE', '%@evce.temp');
             });
 
         // Calculate total excluded recharge amount (Completed recharges for users without NIT/CI/temp RFID)
         $excludedRechargesQuery = DB::table('wallet_transactions')
             ->where('type', 'RECHARGE')
             ->where('status', 'Completed')
-            ->whereIn('user_id', function($q) {
+            ->whereIn('user_id', function ($q) {
                 $q->select('id')
-                  ->from('users')
-                  ->where('is_admin', 0)
-                  ->whereNotExists(function($query) {
-                      $query->select(DB::raw(1))
+                    ->from('users')
+                    ->where('is_admin', 0)
+                    ->whereNotExists(function ($query) {
+                        $query->select(DB::raw(1))
                             ->from('model_has_roles')
                             ->join('roles', 'model_has_roles.role_id', '=', 'roles.id')
                             ->whereColumn('model_has_roles.model_id', 'users.id')
                             ->where('model_has_roles.model_type', 'App\\Models\\User')
                             ->where('roles.name', '<>', 'client');
-                  })
-                  ->where(function($sub) {
-                      $sub->whereNull('billing_document')
-                          ->orWhere('billing_document', '')
-                          ->orWhere('billing_document', '0')
-                          ->orWhere('name', 'LIKE', 'Usuario RFID%')
-                          ->orWhere('email', 'LIKE', '%@evce.temp');
-                  });
+                    })
+                    ->where(function ($sub) {
+                        $sub->whereNull('billing_document')
+                            ->orWhere('billing_document', '')
+                            ->orWhere('billing_document', '0')
+                            ->orWhere('name', 'LIKE', 'Usuario RFID%')
+                            ->orWhere('email', 'LIKE', '%@evce.temp');
+                    });
             });
 
         // Calculate total recharged amount for enterprise/dealerships (payment_method CREDITO, status PENDING, and valid invoice_url)
@@ -187,11 +187,11 @@ class ExecutiveReportController extends Controller
         if ($month) {
             $carbonMonth = Carbon::parse($month . '-01');
             $rechargesQuery->whereRaw("DATE($localTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
-                           ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
+                ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
             $excludedRechargesQuery->whereRaw("DATE($localTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
-                                   ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
+                ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
             $creditQuery->whereRaw("DATE($localTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
-                        ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
+                ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
         } else {
             if ($startDate) {
                 $rechargesQuery->whereRaw("DATE($localTimeExpr) >= ?", [$startDate]);
@@ -304,220 +304,224 @@ class ExecutiveReportController extends Controller
             $mStart = $filterMonth . '-01 00:00:00';
             $mEnd = date('Y-m-t 23:59:59', strtotime($filterMonth . '-01'));
 
-            $activeTariff = \App\Models\Tariff::where(function($q) use ($mEnd) {
-                    $q->whereNull('valid_from')
-                      ->orWhere('valid_from', '<=', $mEnd);
-                })
-                ->where(function($q) use ($mStart) {
+            $activeTariff = \App\Models\Tariff::where(function ($q) use ($mEnd) {
+                $q->whereNull('valid_from')
+                    ->orWhere('valid_from', '<=', $mEnd);
+            })
+                ->where(function ($q) use ($mStart) {
                     $q->whereNull('valid_until')
-                      ->orWhere('valid_until', '>=', $mStart);
+                        ->orWhere('valid_until', '>=', $mStart);
                 })
                 ->orderBy('valid_from', 'desc')
                 ->first();
 
-            $defaultBajo = $activeTariff && $activeTariff->b1_price_kwh !== null ? (float)$activeTariff->b1_price_kwh : 0.0;
-            $defaultMedio = $activeTariff && $activeTariff->b2_price_kwh !== null ? (float)$activeTariff->b2_price_kwh : 0.0;
-            $defaultAlto = $activeTariff && $activeTariff->b3_price_kwh !== null ? (float)$activeTariff->b3_price_kwh : 0.0;
+            $defaultBajo = $activeTariff && $activeTariff->b1_price_kwh !== null ? (float) $activeTariff->b1_price_kwh : 0.0;
+            $defaultMedio = $activeTariff && $activeTariff->b2_price_kwh !== null ? (float) $activeTariff->b2_price_kwh : 0.0;
+            $defaultAlto = $activeTariff && $activeTariff->b3_price_kwh !== null ? (float) $activeTariff->b3_price_kwh : 0.0;
 
-        $reqBajo = (float) $request->query('rateBajo', $defaultBajo);
-        $reqMedio = (float) $request->query('rateMedio', $defaultMedio);
-        $reqAlto = (float) $request->query('rateAlto', $defaultAlto);
+            $reqBajo = (float) $request->query('rateBajo', $defaultBajo);
+            $reqMedio = (float) $request->query('rateMedio', $defaultMedio);
+            $reqAlto = (float) $request->query('rateAlto', $defaultAlto);
 
-        $query = ChargingSession::query()->where('charging_sessions.status', 'Completed');
-        $this->applyFilters($query, $request);
+            $query = ChargingSession::query()->where('charging_sessions.status', 'Completed');
+            $this->applyFilters($query, $request);
 
-        // Fetching all completed sessions matching filters. To optimize performance, we select only necessary fields.
-        $sessions = $query->with('station')
-            ->select('id', 'start_time', 'stop_time', 'total_energy_kwh', 'applied_tariff_snapshot', 'tariff_id', 'station_id')
-            ->get();
+            // Fetching all completed sessions matching filters. To optimize performance, we select only necessary fields.
+            $sessions = $query->with('station')
+                ->select('id', 'start_time', 'stop_time', 'total_energy_kwh', 'applied_tariff_snapshot', 'tariff_id', 'station_id')
+                ->get();
 
-        $billingService = new \App\Services\BillingService();
+            $billingService = new \App\Services\BillingService();
 
-        $monthlyData = [];
+            $monthlyData = [];
 
-        foreach ($sessions as $session) {
-            $localStart = \Carbon\Carbon::parse($session->start_time)->setTimezone('America/La_Paz');
-            $month = $localStart->format('Y-m');
+            foreach ($sessions as $session) {
+                $localStart = \Carbon\Carbon::parse($session->start_time)->setTimezone('America/La_Paz');
+                $month = $localStart->format('Y-m');
 
-            if (!isset($monthlyData[$month])) {
-                $monthlyData[$month] = [
-                    'kwh_bajo' => 0.0,
-                    'kwh_medio' => 0.0,
-                    'kwh_alto' => 0.0,
-                    'total_kwh' => 0.0,
-                    'tariffs' => [],
+                if (!isset($monthlyData[$month])) {
+                    $monthlyData[$month] = [
+                        'kwh_bajo' => 0.0,
+                        'kwh_medio' => 0.0,
+                        'kwh_alto' => 0.0,
+                        'total_kwh' => 0.0,
+                        'tariffs' => [],
+                    ];
+                }
+
+                // Retrieve breakdown
+                $breakdown = null;
+                if ($session->applied_tariff_snapshot) {
+                    $snapshot = is_array($session->applied_tariff_snapshot)
+                        ? $session->applied_tariff_snapshot
+                        : json_decode($session->applied_tariff_snapshot, true);
+
+                    $breakdown = $snapshot['billing_breakdown'] ?? null;
+                }
+
+                if (!$breakdown) {
+                    // Calculate dynamically
+                    try {
+                        $pricing = $billingService->calculateSessionCost($session, (float) $session->total_energy_kwh, $session->stop_time);
+                        $breakdown = $pricing['breakdown'] ?? [];
+                    } catch (\Exception $e) {
+                        $breakdown = [];
+                    }
+                }
+
+                $sessionKwhBajo = 0.0;
+                $sessionKwhMedio = 0.0;
+                $sessionKwhAlto = 0.0;
+
+                foreach ($breakdown as $item) {
+                    $blockIdx = (int) ($item['block'] ?? 1);
+                    $kwh = (float) ($item['energy_kwh'] ?? 0);
+                    if ($blockIdx === 1) {
+                        $sessionKwhBajo += $kwh;
+                    } elseif ($blockIdx === 2 || $blockIdx === 4) {
+                        $sessionKwhMedio += $kwh;
+                    } elseif ($blockIdx === 3) {
+                        $sessionKwhAlto += $kwh;
+                    } else {
+                        // Default fallback for any block index >= 5
+                        $sessionKwhBajo += $kwh;
+                    }
+                }
+
+                // Fallback to legacy hour ranges if breakdown is empty and session had energy
+                $totalSessionKwh = (float) $session->total_energy_kwh;
+                if ($sessionKwhBajo + $sessionKwhMedio + $sessionKwhAlto <= 0 && $totalSessionKwh > 0) {
+                    $hour = (int) $localStart->format('H');
+                    if ($hour >= 23 || $hour < 7) {
+                        $sessionKwhBajo = $totalSessionKwh;
+                    } elseif ($hour >= 18 && $hour < 21) {
+                        $sessionKwhAlto = $totalSessionKwh;
+                    } else {
+                        $sessionKwhMedio = $totalSessionKwh;
+                    }
+                }
+
+                $monthlyData[$month]['kwh_bajo'] += $sessionKwhBajo;
+                $monthlyData[$month]['kwh_medio'] += $sessionKwhMedio;
+                $monthlyData[$month]['kwh_alto'] += $sessionKwhAlto;
+                $monthlyData[$month]['total_kwh'] += $totalSessionKwh;
+
+                if ($session->tariff_id) {
+                    $monthlyData[$month]['tariffs'][] = $session->tariff_id;
+                }
+            }
+
+            ksort($monthlyData);
+
+            $resultMonthly = [];
+            $totalKwhBajo = 0;
+            $totalKwhMedio = 0;
+            $totalKwhAlto = 0;
+            $grandTotalKwh = 0;
+            $totalGrossRevenue = 0;
+            $latestRates = ['bajo' => $reqBajo, 'medio' => $reqMedio, 'alto' => $reqAlto];
+
+            foreach ($monthlyData as $month => $data) {
+                $kBajo = round($data['kwh_bajo'], 1);
+                $kMedio = round($data['kwh_medio'], 1);
+                $kAlto = round($data['kwh_alto'], 1);
+                $kTotal = round($data['total_kwh'], 1);
+
+                if ($hasCustomRates) {
+                    $mBajo = $reqBajo;
+                    $mMedio = $reqMedio;
+                    $mAlto = $reqAlto;
+                } else {
+                    $monthStart = $month . '-01 00:00:00';
+                    $monthEnd = date('Y-m-t 23:59:59', strtotime($month . '-01'));
+
+                    $tariff = \App\Models\Tariff::where(function ($q) use ($monthEnd) {
+                        $q->whereNull('valid_from')
+                            ->orWhere('valid_from', '<=', $monthEnd);
+                    })
+                        ->where(function ($q) use ($monthStart) {
+                            $q->whereNull('valid_until')
+                                ->orWhere('valid_until', '>=', $monthStart);
+                        })
+                        ->orderBy('valid_from', 'desc')
+                        ->first();
+
+                    $mBajo = $tariff && $tariff->b1_price_kwh !== null ? (float) $tariff->b1_price_kwh : 0.0;
+                    $mMedio = $tariff && $tariff->b2_price_kwh !== null ? (float) $tariff->b2_price_kwh : 0.0;
+                    $mAlto = $tariff && $tariff->b3_price_kwh !== null ? (float) $tariff->b3_price_kwh : 0.0;
+                }
+
+                $latestRates = ['bajo' => $mBajo, 'medio' => $mMedio, 'alto' => $mAlto];
+
+                $rBajo = round($kBajo * $mBajo, 2);
+                $rMedio = round($kMedio * $mMedio, 2);
+                $rAlto = round($kAlto * $mAlto, 2);
+                $rTotal = round($rBajo + $rMedio + $rAlto, 2);
+
+                $totalKwhBajo += $kBajo;
+                $totalKwhMedio += $kMedio;
+                $totalKwhAlto += $kAlto;
+                $grandTotalKwh += $kTotal;
+                $totalGrossRevenue += $rTotal;
+
+                $resultMonthly[] = [
+                    'month' => $month,
+                    'bloque_bajo' => ['kwh' => $kBajo, 'rate_aetn' => $mBajo, 'gross_revenue' => $rBajo],
+                    'bloque_medio' => ['kwh' => $kMedio, 'rate_aetn' => $mMedio, 'gross_revenue' => $rMedio],
+                    'bloque_alto' => ['kwh' => $kAlto, 'rate_aetn' => $mAlto, 'gross_revenue' => $rAlto],
+                    'total_kwh' => $kTotal,
+                    'total_gross_revenue' => $rTotal,
                 ];
             }
 
-            // Retrieve breakdown
-            $breakdown = null;
-            if ($session->applied_tariff_snapshot) {
-                $snapshot = is_array($session->applied_tariff_snapshot) 
-                    ? $session->applied_tariff_snapshot 
-                    : json_decode($session->applied_tariff_snapshot, true);
+            // Use active tariff resolved for the period to get current hour definitions
+            $defTariff = $activeTariff ?: (\App\Models\Tariff::where('name', 'LIKE', '%Estándar%')
+                ->orWhere('name', 'LIKE', '%Estandar%')
+                ->first() ?: \App\Models\Tariff::first());
 
-                $breakdown = $snapshot['billing_breakdown'] ?? null;
-            }
+            // Standardize formats for B1, B2, B3 hours
+            $formatTime = function ($timeStr, $default) {
+                if (!$timeStr)
+                    return $default;
+                return substr($timeStr, 0, 5); // Take "HH:MM" from "HH:MM:SS"
+            };
 
-            if (!$breakdown) {
-                // Calculate dynamically
-                try {
-                    $pricing = $billingService->calculateSessionCost($session, (float)$session->total_energy_kwh, $session->stop_time);
-                    $breakdown = $pricing['breakdown'] ?? [];
-                } catch (\Exception $e) {
-                    $breakdown = [];
+            $bajoTime = $defTariff && $defTariff->b1_start && $defTariff->b1_end
+                ? ($formatTime($defTariff->b1_start, '23:00') . ' - ' . $formatTime($defTariff->b1_end, '07:00'))
+                : "23:00 - 07:00";
+
+            $altoTime = $defTariff && $defTariff->b3_start && $defTariff->b3_end
+                ? ($formatTime($defTariff->b3_start, '18:00') . ' - ' . $formatTime($defTariff->b3_end, '21:00'))
+                : "18:00 - 21:00";
+
+            $medioTime = "07:00 - 18:00, 21:00 - 23:00";
+            if ($defTariff && $defTariff->b2_start && $defTariff->b2_end) {
+                $medioTime = $formatTime($defTariff->b2_start, '07:00') . ' - ' . $formatTime($defTariff->b2_end, '18:00');
+                if ($defTariff->b4_start && $defTariff->b4_end) {
+                    $medioTime .= ', ' . $formatTime($defTariff->b4_start, '21:00') . ' - ' . $formatTime($defTariff->b4_end, '23:00');
                 }
             }
 
-            $sessionKwhBajo = 0.0;
-            $sessionKwhMedio = 0.0;
-            $sessionKwhAlto = 0.0;
-
-            foreach ($breakdown as $item) {
-                $blockIdx = (int)($item['block'] ?? 1);
-                $kwh = (float)($item['energy_kwh'] ?? 0);
-                if ($blockIdx === 1) {
-                    $sessionKwhBajo += $kwh;
-                } elseif ($blockIdx === 2 || $blockIdx === 4) {
-                    $sessionKwhMedio += $kwh;
-                } elseif ($blockIdx === 3) {
-                    $sessionKwhAlto += $kwh;
-                } else {
-                    // Default fallback for any block index >= 5
-                    $sessionKwhBajo += $kwh;
-                }
-            }
-
-            // Fallback to legacy hour ranges if breakdown is empty and session had energy
-            $totalSessionKwh = (float)$session->total_energy_kwh;
-            if ($sessionKwhBajo + $sessionKwhMedio + $sessionKwhAlto <= 0 && $totalSessionKwh > 0) {
-                $hour = (int)$localStart->format('H');
-                if ($hour >= 23 || $hour < 7) {
-                    $sessionKwhBajo = $totalSessionKwh;
-                } elseif ($hour >= 18 && $hour < 21) {
-                    $sessionKwhAlto = $totalSessionKwh;
-                } else {
-                    $sessionKwhMedio = $totalSessionKwh;
-                }
-            }
-
-            $monthlyData[$month]['kwh_bajo'] += $sessionKwhBajo;
-            $monthlyData[$month]['kwh_medio'] += $sessionKwhMedio;
-            $monthlyData[$month]['kwh_alto'] += $sessionKwhAlto;
-            $monthlyData[$month]['total_kwh'] += $totalSessionKwh;
-
-            if ($session->tariff_id) {
-                $monthlyData[$month]['tariffs'][] = $session->tariff_id;
-            }
-        }
-
-        ksort($monthlyData);
-
-        $resultMonthly = [];
-        $totalKwhBajo = 0; $totalKwhMedio = 0; $totalKwhAlto = 0; $grandTotalKwh = 0;
-        $totalGrossRevenue = 0;
-        $latestRates = ['bajo' => $reqBajo, 'medio' => $reqMedio, 'alto' => $reqAlto];
-
-        foreach ($monthlyData as $month => $data) {
-            $kBajo = round($data['kwh_bajo'], 1);
-            $kMedio = round($data['kwh_medio'], 1);
-            $kAlto = round($data['kwh_alto'], 1);
-            $kTotal = round($data['total_kwh'], 1);
-
-            if ($hasCustomRates) {
-                $mBajo = $reqBajo;
-                $mMedio = $reqMedio;
-                $mAlto = $reqAlto;
-            } else {
-                $monthStart = $month . '-01 00:00:00';
-                $monthEnd = date('Y-m-t 23:59:59', strtotime($month . '-01'));
-
-                $tariff = \App\Models\Tariff::where(function($q) use ($monthEnd) {
-                        $q->whereNull('valid_from')
-                          ->orWhere('valid_from', '<=', $monthEnd);
-                    })
-                    ->where(function($q) use ($monthStart) {
-                        $q->whereNull('valid_until')
-                          ->orWhere('valid_until', '>=', $monthStart);
-                    })
-                    ->orderBy('valid_from', 'desc')
-                    ->first();
-
-                $mBajo = $tariff && $tariff->b1_price_kwh !== null ? (float)$tariff->b1_price_kwh : 0.0;
-                $mMedio = $tariff && $tariff->b2_price_kwh !== null ? (float)$tariff->b2_price_kwh : 0.0;
-                $mAlto = $tariff && $tariff->b3_price_kwh !== null ? (float)$tariff->b3_price_kwh : 0.0;
-            }
-
-            $latestRates = ['bajo' => $mBajo, 'medio' => $mMedio, 'alto' => $mAlto];
-
-            $rBajo = round($kBajo * $mBajo, 2);
-            $rMedio = round($kMedio * $mMedio, 2);
-            $rAlto = round($kAlto * $mAlto, 2);
-            $rTotal = round($rBajo + $rMedio + $rAlto, 2);
-
-            $totalKwhBajo += $kBajo;
-            $totalKwhMedio += $kMedio;
-            $totalKwhAlto += $kAlto;
-            $grandTotalKwh += $kTotal;
-            $totalGrossRevenue += $rTotal;
-
-            $resultMonthly[] = [
-                'month' => $month,
-                'bloque_bajo' => ['kwh' => $kBajo, 'rate_aetn' => $mBajo, 'gross_revenue' => $rBajo],
-                'bloque_medio' => ['kwh' => $kMedio, 'rate_aetn' => $mMedio, 'gross_revenue' => $rMedio],
-                'bloque_alto' => ['kwh' => $kAlto, 'rate_aetn' => $mAlto, 'gross_revenue' => $rAlto],
-                'total_kwh' => $kTotal,
-                'total_gross_revenue' => $rTotal,
+            $blockDefinitions = [
+                'bajo' => $bajoTime,
+                'medio' => $medioTime,
+                'alto' => $altoTime,
             ];
-        }
 
-        // Use active tariff resolved for the period to get current hour definitions
-        $defTariff = $activeTariff ?: (\App\Models\Tariff::where('name', 'LIKE', '%Estándar%')
-            ->orWhere('name', 'LIKE', '%Estandar%')
-            ->first() ?: \App\Models\Tariff::first());
-
-        // Standardize formats for B1, B2, B3 hours
-        $formatTime = function ($timeStr, $default) {
-            if (!$timeStr) return $default;
-            return substr($timeStr, 0, 5); // Take "HH:MM" from "HH:MM:SS"
-        };
-
-        $bajoTime = $defTariff && $defTariff->b1_start && $defTariff->b1_end 
-            ? ($formatTime($defTariff->b1_start, '23:00') . ' - ' . $formatTime($defTariff->b1_end, '07:00'))
-            : "23:00 - 07:00";
-
-        $altoTime = $defTariff && $defTariff->b3_start && $defTariff->b3_end
-            ? ($formatTime($defTariff->b3_start, '18:00') . ' - ' . $formatTime($defTariff->b3_end, '21:00'))
-            : "18:00 - 21:00";
-
-        $medioTime = "07:00 - 18:00, 21:00 - 23:00";
-        if ($defTariff && $defTariff->b2_start && $defTariff->b2_end) {
-            $medioTime = $formatTime($defTariff->b2_start, '07:00') . ' - ' . $formatTime($defTariff->b2_end, '18:00');
-            if ($defTariff->b4_start && $defTariff->b4_end) {
-                $medioTime .= ', ' . $formatTime($defTariff->b4_start, '21:00') . ' - ' . $formatTime($defTariff->b4_end, '23:00');
-            }
-        }
-
-        $blockDefinitions = [
-            'bajo' => $bajoTime,
-            'medio' => $medioTime,
-            'alto' => $altoTime,
-        ];
-
-        return response()->json([
-            'success' => true,
-            'has_data' => count($resultMonthly) > 0 && $grandTotalKwh > 0,
-            'rates_applied' => $latestRates,
-            'summary_totals' => [
-                'total_kwh_bajo' => round($totalKwhBajo, 1),
-                'total_kwh_medio' => round($totalKwhMedio, 1),
-                'total_kwh_alto' => round($totalKwhAlto, 1),
-                'grand_total_kwh' => round($grandTotalKwh, 1),
-                'grand_total_gross_revenue_bob' => round($totalGrossRevenue, 2),
-            ],
-            'monthly_details' => $resultMonthly,
-            'block_definitions' => $blockDefinitions,
-        ]);
+            return response()->json([
+                'success' => true,
+                'has_data' => count($resultMonthly) > 0 && $grandTotalKwh > 0,
+                'rates_applied' => $latestRates,
+                'summary_totals' => [
+                    'total_kwh_bajo' => round($totalKwhBajo, 1),
+                    'total_kwh_medio' => round($totalKwhMedio, 1),
+                    'total_kwh_alto' => round($totalKwhAlto, 1),
+                    'grand_total_kwh' => round($grandTotalKwh, 1),
+                    'grand_total_gross_revenue_bob' => round($totalGrossRevenue, 2),
+                ],
+                'monthly_details' => $resultMonthly,
+                'block_definitions' => $blockDefinitions,
+            ]);
         } catch (\Throwable $e) {
             \Illuminate\Support\Facades\Log::error('getAetnBilling Error: ' . $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
             return response()->json([
@@ -597,19 +601,61 @@ class ExecutiveReportController extends Controller
             ->groupByRaw('IFNULL(NULLIF(connectors.type, ""), "Desconocido")')
             ->get();
 
+        // Carga ansiosa incluyendo vehículos para extraer la placa
+        $eagerRelations = ['station', 'user.vehicles', 'rfidTag.user.vehicles'];
+        if (method_exists(ChargingSession::class, 'vehicle')) {
+            $eagerRelations[] = 'vehicle';
+        }
+
         $latestSessions = (clone $baseQuery)
-            ->with(['station', 'user'])
+            ->with($eagerRelations)
             ->leftJoin('connectors', 'charging_sessions.connector_id', '=', 'connectors.id')
             ->select('charging_sessions.*')
             ->selectRaw('IFNULL(NULLIF(connectors.type, ""), "Desconocido") as mapped_connector_type')
             ->orderBy('charging_sessions.start_time', 'desc')
             ->get()
             ->map(function ($s) {
+                // 1. Extraer placa directamente si existe en la sesión
+                $plate = $s->vehicle_plate ?? $s->plate ?? $s->license_plate ?? $s->placa ?? null;
+
+                // 2. Si la sesión tiene relación directa con vehículo
+                if (!$plate && isset($s->vehicle) && $s->vehicle) {
+                    $plate = $s->vehicle->plate ?? $s->vehicle->license_plate ?? $s->vehicle->placa ?? null;
+                }
+
+                // 3. Si no, extraer de los vehículos registrados del usuario
+                if (!$plate && $s->user && $s->user->vehicles && $s->user->vehicles->isNotEmpty()) {
+                    $plates = $s->user->vehicles->map(function ($v) {
+                        return $v->plate ?? $v->license_plate ?? $v->placa ?? null;
+                    })->filter()->unique()->values();
+
+                    if ($plates->isNotEmpty()) {
+                        $plate = $plates->implode(', ');
+                    }
+                }
+
+                // 4. Si fue sesión iniciada por tarjeta RFID, buscar por el usuario del RFID
+                if (!$plate && $s->rfidTag && $s->rfidTag->user && $s->rfidTag->user->vehicles && $s->rfidTag->user->vehicles->isNotEmpty()) {
+                    $plates = $s->rfidTag->user->vehicles->map(function ($v) {
+                        return $v->plate ?? $v->license_plate ?? $v->placa ?? null;
+                    })->filter()->unique()->values();
+
+                    if ($plates->isNotEmpty()) {
+                        $plate = $plates->implode(', ');
+                    }
+                }
+
+                if (empty($plate)) {
+                    $plate = 'S/P'; // Sin Placa / Particular
+                }
+
                 return [
                     'id' => $s->id,
                     'transaction_id' => $s->transaction_id,
                     'station_name' => $s->station?->name ?? 'N/A',
                     'user_name' => $s->user?->name ?? 'Anónimo/Card',
+                    'plate' => $plate, // <-- NUEVA COLUMNA PLACA
+                    'placa' => $plate, // Soporte alternativo para el frontend
                     'status' => $s->status,
                     'start_time' => $s->start_time?->toDateTimeString(),
                     'fecha_local_corregida' => $s->start_time ? $s->start_time->setTimezone('America/La_Paz')->toDateTimeString() : 'N/A',
@@ -644,89 +690,89 @@ class ExecutiveReportController extends Controller
         $rechargesQuery = DB::table('wallet_transactions')
             ->where('type', 'RECHARGE')
             ->where('status', 'Completed')
-            ->whereIn('user_id', function($q) {
+            ->whereIn('user_id', function ($q) {
                 $q->select('id')
-                  ->from('users')
-                  ->where('is_admin', 0)
-                  ->whereNotExists(function($query) {
-                      $query->select(DB::raw(1))
+                    ->from('users')
+                    ->where('is_admin', 0)
+                    ->whereNotExists(function ($query) {
+                        $query->select(DB::raw(1))
                             ->from('model_has_roles')
                             ->join('roles', 'model_has_roles.role_id', '=', 'roles.id')
                             ->whereColumn('model_has_roles.model_id', 'users.id')
                             ->where('model_has_roles.model_type', 'App\\Models\\User')
                             ->where('roles.name', '<>', 'client');
-                  })
-                  ->whereNotNull('billing_document')
-                  ->where('billing_document', '<>', '')
-                  ->where('billing_document', '<>', '0')
-                  ->where('name', 'NOT LIKE', 'Usuario RFID%')
-                  ->where('email', 'NOT LIKE', '%@evce.temp');
+                    })
+                    ->whereNotNull('billing_document')
+                    ->where('billing_document', '<>', '')
+                    ->where('billing_document', '<>', '0')
+                    ->where('name', 'NOT LIKE', 'Usuario RFID%')
+                    ->where('email', 'NOT LIKE', '%@evce.temp');
             });
 
         $excludedRechargesQuery = DB::table('wallet_transactions')
             ->where('type', 'RECHARGE')
             ->where('status', 'Completed')
-            ->whereIn('user_id', function($q) {
+            ->whereIn('user_id', function ($q) {
                 $q->select('id')
-                  ->from('users')
-                  ->where('is_admin', 0)
-                  ->whereNotExists(function($query) {
-                      $query->select(DB::raw(1))
+                    ->from('users')
+                    ->where('is_admin', 0)
+                    ->whereNotExists(function ($query) {
+                        $query->select(DB::raw(1))
                             ->from('model_has_roles')
                             ->join('roles', 'model_has_roles.role_id', '=', 'roles.id')
                             ->whereColumn('model_has_roles.model_id', 'users.id')
                             ->where('model_has_roles.model_type', 'App\\Models\\User')
                             ->where('roles.name', '<>', 'client');
-                  })
-                  ->where(function($sub) {
-                      $sub->whereNull('billing_document')
-                          ->orWhere('billing_document', '')
-                          ->orWhere('billing_document', '0')
-                          ->orWhere('name', 'LIKE', 'Usuario RFID%')
-                          ->orWhere('email', 'LIKE', '%@evce.temp');
-                  });
+                    })
+                    ->where(function ($sub) {
+                        $sub->whereNull('billing_document')
+                            ->orWhere('billing_document', '')
+                            ->orWhere('billing_document', '0')
+                            ->orWhere('name', 'LIKE', 'Usuario RFID%')
+                            ->orWhere('email', 'LIKE', '%@evce.temp');
+                    });
             });
 
         $refundsQuery = DB::table('wallet_transactions')
             ->whereIn('type', ['REFUND', 'CREDIT'])
-            ->whereIn('user_id', function($q) {
+            ->whereIn('user_id', function ($q) {
                 $q->select('id')
-                  ->from('users')
-                  ->where('is_admin', 0)
-                  ->whereNotExists(function($query) {
-                      $query->select(DB::raw(1))
+                    ->from('users')
+                    ->where('is_admin', 0)
+                    ->whereNotExists(function ($query) {
+                        $query->select(DB::raw(1))
                             ->from('model_has_roles')
                             ->join('roles', 'model_has_roles.role_id', '=', 'roles.id')
                             ->whereColumn('model_has_roles.model_id', 'users.id')
                             ->where('model_has_roles.model_type', 'App\\Models\\User')
                             ->where('roles.name', '<>', 'client');
-                  })
-                  ->whereNotNull('billing_document')
-                  ->where('billing_document', '<>', '')
-                  ->where('billing_document', '<>', '0')
-                  ->where('name', 'NOT LIKE', 'Usuario RFID%')
-                  ->where('email', 'NOT LIKE', '%@evce.temp');
+                    })
+                    ->whereNotNull('billing_document')
+                    ->where('billing_document', '<>', '')
+                    ->where('billing_document', '<>', '0')
+                    ->where('name', 'NOT LIKE', 'Usuario RFID%')
+                    ->where('email', 'NOT LIKE', '%@evce.temp');
             });
 
         $sessionsQuery = DB::table('charging_sessions')
             ->where('status', 'Completed')
-            ->whereIn('user_id', function($q) {
+            ->whereIn('user_id', function ($q) {
                 $q->select('id')
-                  ->from('users')
-                  ->where('is_admin', 0)
-                  ->whereNotExists(function($query) {
-                      $query->select(DB::raw(1))
+                    ->from('users')
+                    ->where('is_admin', 0)
+                    ->whereNotExists(function ($query) {
+                        $query->select(DB::raw(1))
                             ->from('model_has_roles')
                             ->join('roles', 'model_has_roles.role_id', '=', 'roles.id')
                             ->whereColumn('model_has_roles.model_id', 'users.id')
                             ->where('model_has_roles.model_type', 'App\\Models\\User')
                             ->where('roles.name', '<>', 'client');
-                  })
-                  ->whereNotNull('billing_document')
-                  ->where('billing_document', '<>', '')
-                  ->where('billing_document', '<>', '0')
-                  ->where('name', 'NOT LIKE', 'Usuario RFID%')
-                  ->where('email', 'NOT LIKE', '%@evce.temp');
+                    })
+                    ->whereNotNull('billing_document')
+                    ->where('billing_document', '<>', '')
+                    ->where('billing_document', '<>', '0')
+                    ->where('name', 'NOT LIKE', 'Usuario RFID%')
+                    ->where('email', 'NOT LIKE', '%@evce.temp');
             });
 
         // Apply date filters
@@ -734,21 +780,21 @@ class ExecutiveReportController extends Controller
         if ($month) {
             $carbonMonth = Carbon::parse($month . '-01');
             $rechargesQuery->whereRaw("DATE($localTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
-                           ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
+                ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
             $excludedRechargesQuery->whereRaw("DATE($localTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
-                                   ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
+                ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
             $refundsQuery->whereRaw("DATE($localTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
-                         ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
-            
+                ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
+
             $sessTimeExpr = 'DATE_SUB(start_time, INTERVAL 4 HOUR)';
             $sessionsQuery->whereRaw("DATE($sessTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
-                          ->whereRaw("DATE($sessTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
+                ->whereRaw("DATE($sessTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
         } else {
             if ($startDate) {
                 $rechargesQuery->whereRaw("DATE($localTimeExpr) >= ?", [$startDate]);
                 $excludedRechargesQuery->whereRaw("DATE($localTimeExpr) >= ?", [$startDate]);
                 $refundsQuery->whereRaw("DATE($localTimeExpr) >= ?", [$startDate]);
-                
+
                 $sessTimeExpr = 'DATE_SUB(start_time, INTERVAL 4 HOUR)';
                 $sessionsQuery->whereRaw("DATE($sessTimeExpr) >= ?", [$startDate]);
             }
@@ -756,7 +802,7 @@ class ExecutiveReportController extends Controller
                 $rechargesQuery->whereRaw("DATE($localTimeExpr) <= ?", [$endDate]);
                 $excludedRechargesQuery->whereRaw("DATE($localTimeExpr) <= ?", [$endDate]);
                 $refundsQuery->whereRaw("DATE($localTimeExpr) <= ?", [$endDate]);
-                
+
                 $sessTimeExpr = 'DATE_SUB(start_time, INTERVAL 4 HOUR)';
                 $sessionsQuery->whereRaw("DATE($sessTimeExpr) <= ?", [$endDate]);
             }
@@ -805,9 +851,9 @@ class ExecutiveReportController extends Controller
             ->selectRaw($rechargesSelect, $rechargesBindings)
             ->where('type', 'RECHARGE')
             ->where('status', 'Completed')
-            ->where(function($q) {
+            ->where(function ($q) {
                 $q->where('reference_id', 'LIKE', 'TAG-RECH-%')
-                  ->orWhere('reference', 'LIKE', 'TAG-RECH-%');
+                    ->orWhere('reference', 'LIKE', 'TAG-RECH-%');
             })
             ->groupBy('user_id');
 
@@ -845,12 +891,12 @@ class ExecutiveReportController extends Controller
             ->leftJoin('rfid_tags', 'charging_sessions.rfid_tag_id', '=', 'rfid_tags.id')
             ->selectRaw($refundsSelect, $refundsBindings)
             ->whereIn('wallet_transactions.type', ['REFUND', 'CREDIT'])
-            ->where(function($q) {
-                $q->where(function($sub) {
+            ->where(function ($q) {
+                $q->where(function ($sub) {
                     $sub->whereNotNull('charging_sessions.rfid_tag_id')
                         ->where('rfid_tags.is_virtual', 0);
                 })
-                ->orWhere('wallet_transactions.description', 'LIKE', '%(Tarjeta:%');
+                    ->orWhere('wallet_transactions.description', 'LIKE', '%(Tarjeta:%');
             })
             ->groupBy('wallet_transactions.user_id');
 
@@ -955,15 +1001,15 @@ class ExecutiveReportController extends Controller
             if ($rfid_opening_balance < 0) {
                 $rfid_opening_balance = 0.00;
             }
-            
+
             // Determine if there is pre-existing historical balance not tracked by transactions
             $total_lifetime_transactions = ($rfid_recharges_before + $rfid_recharges_during + $rfid_recharges_after) +
-                                            ($rfid_refunds_before + $rfid_refunds_during + $rfid_refunds_after) -
-                                            ($rfid_consumption_before + $rfid_consumption_during + $rfid_consumption_after);
-            
+                ($rfid_refunds_before + $rfid_refunds_during + $rfid_refunds_after) -
+                ($rfid_consumption_before + $rfid_consumption_during + $rfid_consumption_after);
+
             $historical_discrepancy = abs($rfid_current_balance - $total_lifetime_transactions);
             $has_untraced_history = $historical_discrepancy > 2.0; // 2 BOB tolerance
-            
+
             $audit_basis = 'complete';
             if ($has_untraced_history) {
                 $audit_basis = 'historical_balance_missing';
@@ -992,7 +1038,7 @@ class ExecutiveReportController extends Controller
                 'physical_tags_count' => (int) $c->physical_tags_count,
                 'virtual_tags_count' => (int) $c->virtual_tags_count,
                 'app_balance_bob' => round((float) $c->app_balance_bob, 2),
-                
+
                 // Reconciliation fields
                 'rfid_opening_balance' => round($rfid_opening_balance, 2),
                 'rfid_recharges_period' => round($rfid_recharges_during, 2),
@@ -1007,13 +1053,13 @@ class ExecutiveReportController extends Controller
         // Query all users (Base Query Builder)
         $baseQueryBuilder = DB::table('users')
             ->where('users.is_admin', 0)
-            ->whereNotExists(function($query) {
+            ->whereNotExists(function ($query) {
                 $query->select(DB::raw(1))
-                      ->from('model_has_roles')
-                      ->join('roles', 'model_has_roles.role_id', '=', 'roles.id')
-                      ->whereColumn('model_has_roles.model_id', 'users.id')
-                      ->where('model_has_roles.model_type', 'App\\Models\\User')
-                      ->where('roles.name', '<>', 'client');
+                    ->from('model_has_roles')
+                    ->join('roles', 'model_has_roles.role_id', '=', 'roles.id')
+                    ->whereColumn('model_has_roles.model_id', 'users.id')
+                    ->where('model_has_roles.model_type', 'App\\Models\\User')
+                    ->where('roles.name', '<>', 'client');
             })
             ->leftJoin('wallets', 'users.id', '=', 'wallets.user_id')
             ->leftJoinSub($legacySessionsSub, 'sessions', 'users.id', '=', 'sessions.user_id')
@@ -1069,12 +1115,12 @@ class ExecutiveReportController extends Controller
             ->where('users.email', 'NOT LIKE', '%@evce.temp');
 
         $excludedConsumersQuery = (clone $baseQueryBuilder)
-            ->where(function($q) {
+            ->where(function ($q) {
                 $q->whereNull('users.billing_document')
-                  ->orWhere('users.billing_document', '')
-                  ->orWhere('users.billing_document', '0')
-                  ->orWhere('users.name', 'LIKE', 'Usuario RFID%')
-                  ->orWhere('users.email', 'LIKE', '%@evce.temp');
+                    ->orWhere('users.billing_document', '')
+                    ->orWhere('users.billing_document', '0')
+                    ->orWhere('users.name', 'LIKE', 'Usuario RFID%')
+                    ->orWhere('users.email', 'LIKE', '%@evce.temp');
             });
 
         $topConsumers = $topConsumersQuery->get()->map($mapUserBalances);
@@ -1116,7 +1162,7 @@ class ExecutiveReportController extends Controller
         $allTags = $tagsQuery->get();
         $totalCards = $allTags->count();
         $usedTagIds = ChargingSession::whereNotNull('rfid_tag_id')->distinct()->pluck('rfid_tag_id')->toArray();
-        
+
         $usedCardsCount = count(array_intersect($allTags->pluck('id')->toArray(), $usedTagIds));
         $unusedCardsCount = $totalCards - $usedCardsCount;
 
@@ -1168,7 +1214,7 @@ class ExecutiveReportController extends Controller
         $topRfidDetails = $allTags
             ->map(function ($tag) use ($rfidStats, $userWalletRecharges) {
                 $stat = $rfidStats->get($tag->id);
-                
+
                 // Get vehicle brand(s) of user
                 $brands = 'N/A';
                 if ($tag->user && $tag->user->vehicles) {
@@ -1177,12 +1223,12 @@ class ExecutiveReportController extends Controller
                 if (empty($brands)) {
                     $brands = 'N/A';
                 }
-                
+
                 // Get the last session date for this RFID
                 $lastSessionDate = ChargingSession::where('rfid_tag_id', $tag->id)
                     ->orderBy('start_time', 'desc')
                     ->value('start_time');
-                
+
                 // Format the local date for the last session
                 $lastSessionLocal = $lastSessionDate ? Carbon::parse($lastSessionDate)->setTimezone('America/La_Paz')->toDateTimeString() : 'Nunca';
 
@@ -1323,9 +1369,9 @@ class ExecutiveReportController extends Controller
             ->first();
 
         $platesDistribution = [
-            '1_vehicle' => (int)($platesDistributionRaw->single_vehicle_users ?? 0),
-            '2_vehicles' => (int)($platesDistributionRaw->double_vehicle_users ?? 0),
-            '3_or_more_vehicles' => (int)($platesDistributionRaw->multi_vehicle_users ?? 0)
+            '1_vehicle' => (int) ($platesDistributionRaw->single_vehicle_users ?? 0),
+            '2_vehicles' => (int) ($platesDistributionRaw->double_vehicle_users ?? 0),
+            '3_or_more_vehicles' => (int) ($platesDistributionRaw->multi_vehicle_users ?? 0)
         ];
 
         // Top clients with most registered plates
@@ -1344,6 +1390,131 @@ class ExecutiveReportController extends Controller
             ->limit(10)
             ->get();
 
+        // =========================================================================
+        // 6. ANÁLISIS DE TAMAÑO DE BATERÍAS DE LOS VEHÍCULOS (NUEVO GRÁFICO)
+        // =========================================================================
+        $possibleBatteryCols = ['battery_capacity', 'battery_capacity_kwh', 'battery_kwh', 'battery_size', 'battery', 'capacity', 'capacidad_bateria'];
+
+        $vehiclesList = (clone $vehicleQuery)->get();
+
+        $batteryRanges = [
+            '< 30 kWh' => 0,
+            '30 - 50 kWh' => 0,
+            '50 - 70 kWh' => 0,
+            '70 - 90 kWh' => 0,
+            '> 90 kWh' => 0,
+        ];
+        $unspecifiedBattery = 0;
+        $validBatteries = [];
+        $brandBatteries = [];
+        $modelBatteries = [];
+
+        foreach ($vehiclesList as $v) {
+            $rawVal = null;
+            foreach ($possibleBatteryCols as $c) {
+                if (isset($v->{$c}) && $v->{$c} !== null && $v->{$c} !== '') {
+                    $rawVal = $v->{$c};
+                    break;
+                }
+            }
+
+            $numericVal = null;
+            if ($rawVal !== null && $rawVal !== '') {
+                if (is_numeric($rawVal)) {
+                    $numericVal = (float) $rawVal;
+                } elseif (is_string($rawVal) && preg_match('/([0-9]+(?:\.[0-9]+)?)/', $rawVal, $matches)) {
+                    $numericVal = (float) $matches[1];
+                }
+            }
+
+            if ($numericVal !== null && $numericVal > 0) {
+                // Si la capacidad fue ingresada en Wh (ej. 54000 Wh), normalizar a kWh
+                if ($numericVal > 1000) {
+                    $numericVal = round($numericVal / 1000, 2);
+                }
+
+                $validBatteries[] = $numericVal;
+
+                if ($numericVal < 30) {
+                    $batteryRanges['< 30 kWh']++;
+                } elseif ($numericVal < 50) {
+                    $batteryRanges['30 - 50 kWh']++;
+                } elseif ($numericVal < 70) {
+                    $batteryRanges['50 - 70 kWh']++;
+                } elseif ($numericVal < 90) {
+                    $batteryRanges['70 - 90 kWh']++;
+                } else {
+                    $batteryRanges['> 90 kWh']++;
+                }
+
+                $brand = !empty($v->brand) ? trim($v->brand) : 'Desconocido';
+                if (!isset($brandBatteries[$brand])) {
+                    $brandBatteries[$brand] = ['total' => 0, 'count' => 0];
+                }
+                $brandBatteries[$brand]['total'] += $numericVal;
+                $brandBatteries[$brand]['count']++;
+
+                $model = trim(($v->brand ?? '') . ' ' . ($v->model ?? ''));
+                if (empty(trim($model))) {
+                    $model = 'Modelo No Especificado';
+                }
+                if (!isset($modelBatteries[$model])) {
+                    $modelBatteries[$model] = ['total' => 0, 'count' => 0];
+                }
+                $modelBatteries[$model]['total'] += $numericVal;
+                $modelBatteries[$model]['count']++;
+            } else {
+                $unspecifiedBattery++;
+            }
+        }
+
+        // Estructura lista para gráficos de distribución (Barras o Pastel)
+        $totalEvaluated = count($validBatteries);
+        $batteryDistributionChart = [];
+        foreach ($batteryRanges as $rangeLabel => $count) {
+            $batteryDistributionChart[] = [
+                'range' => $rangeLabel,
+                'count' => $count,
+                'percentage' => $totalEvaluated > 0 ? round(($count / $totalEvaluated) * 100, 1) : 0,
+            ];
+        }
+
+        // Promedio por marca (kWh)
+        $batteryByBrand = [];
+        foreach ($brandBatteries as $brandName => $bData) {
+            $avgKwh = round($bData['total'] / $bData['count'], 1);
+            $batteryByBrand[] = [
+                'brand' => $brandName,
+                'avg_battery_kwh' => $avgKwh,
+                'battery_kwh' => $avgKwh,
+                'vehicle_count' => $bData['count'],
+            ];
+        }
+        usort($batteryByBrand, fn($a, $b) => $b['avg_battery_kwh'] <=> $a['avg_battery_kwh']);
+        $batteryByBrand = array_slice($batteryByBrand, 0, 10);
+
+        // Promedio por modelo (kWh)
+        $batteryByModel = [];
+        foreach ($modelBatteries as $modelName => $mData) {
+            $avgKwh = round($mData['total'] / $mData['count'], 1);
+            $batteryByModel[] = [
+                'full_model' => $modelName,
+                'avg_battery_kwh' => $avgKwh,
+                'battery_kwh' => $avgKwh,
+                'vehicle_count' => $mData['count'],
+            ];
+        }
+        usort($batteryByModel, fn($a, $b) => $b['vehicle_count'] <=> $a['vehicle_count']);
+        $batteryByModel = array_slice($batteryByModel, 0, 10);
+
+        $batteryMetrics = [
+            'avg_capacity_kwh' => count($validBatteries) > 0 ? round(array_sum($validBatteries) / count($validBatteries), 1) : 0,
+            'min_capacity_kwh' => count($validBatteries) > 0 ? round(min($validBatteries), 1) : 0,
+            'max_capacity_kwh' => count($validBatteries) > 0 ? round(max($validBatteries), 1) : 0,
+            'vehicles_with_battery_count' => count($validBatteries),
+            'unspecified_battery_count' => $unspecifiedBattery,
+        ];
+
         return response()->json([
             'success' => true,
             'metrics' => [
@@ -1352,15 +1523,24 @@ class ExecutiveReportController extends Controller
                 'avg_vehicles_per_client' => $avgVehiclesPerClient,
                 'clients_with_vehicle_no_charges_count' => count($vehicleNoChargeUserIds),
                 'clients_with_charges_no_vehicle_count' => count(array_filter($chargeNoVehicleUserIds)),
+                'avg_battery_capacity_kwh' => $batteryMetrics['avg_capacity_kwh'],
             ],
             'top_brands' => $topBrands,
             'top_models' => $topModels,
             'plates_distribution' => $platesDistribution,
             'top_clients_by_plates' => $topClientsByPlates,
+            'battery_analysis' => [
+                'metrics' => $batteryMetrics,
+                'distribution' => $batteryDistributionChart,
+                'ranges_summary' => $batteryRanges,
+                'by_brand' => $batteryByBrand,
+                'by_model' => $batteryByModel,
+            ],
             'gap_analysis' => [
                 'clients_with_vehicle_no_charges' => $clientsWithVehicleNoCharges,
                 'clients_with_charges_no_vehicle' => $clientsWithChargeNoVehicle,
             ]
         ]);
     }
+
 }

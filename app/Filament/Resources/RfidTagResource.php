@@ -156,7 +156,12 @@ class RfidTagResource extends Resource
                             ->searchable()
                             ->preload()
                             ->required()
-                            ->default(fn() => \App\Models\Product::where('siat_product_code', '99')->first()?->id)
+                            ->default(function () use ($record) {
+                                return $record->product_id
+                                    ?? \App\Models\SystemSetting::get()->product_recharge_id
+                                    ?? \App\Models\Product::where('internal_code', 'RECHARGE')->first()?->id
+                                    ?? \App\Models\Product::first()?->id;
+                            })
                             ->helperText('Producto bajo el cual se facturará esta recarga.')
                             ->visible(fn(Forms\Get $get) => $get('emit_invoice'))
                             ->live()
@@ -174,7 +179,10 @@ class RfidTagResource extends Resource
                             ->live()
                             ->afterStateUpdated(function (Forms\Set $set, $state, Forms\Get $get) {
                                 if (!$state) {
-                                    $productId = $get('product_id') ?? \App\Models\Product::where('siat_product_code', '99')->first()?->id;
+                                    $settings = \App\Models\SystemSetting::get();
+                                    $productId = $get('product_id') 
+                                        ?? $settings->product_recharge_id 
+                                        ?? \App\Models\Product::first()?->id;
                                     if ($productId) {
                                         $product = \App\Models\Product::find($productId);
                                         if ($product) {
@@ -192,14 +200,24 @@ class RfidTagResource extends Resource
                             ->live()
                             ->afterStateUpdated(function (Forms\Set $set, $state, Forms\Get $get) {
                                 if (!$get('custom_description')) {
-                                    $set('description', 'Recarga de tarjeta RFID - Bs ' . number_format((float) $state, 2));
+                                    $settings = \App\Models\SystemSetting::get();
+                                    $productId = $get('product_id') ?? $settings->product_recharge_id;
+                                    $product = $productId ? \App\Models\Product::find($productId) : null;
+                                    if ($product) {
+                                        $set('description', $product->name);
+                                    }
                                 }
                             }),
                         Forms\Components\TextInput::make('description')
                             ->label('Motivo / Descripción')
                             ->required()
                             ->maxLength(255)
-                            ->default('Recarga de tarjeta RFID - Bs 10.00')
+                            ->default(function () use ($record) {
+                                $settings = \App\Models\SystemSetting::get();
+                                $productId = $record->product_id ?? $settings->product_recharge_id;
+                                $product = $productId ? \App\Models\Product::find($productId) : null;
+                                return $product?->name ?? 'Recarga de Saldo';
+                            })
                             ->disabled(fn(Forms\Get $get) => !$get('custom_description'))
                             ->dehydrated(),
                         Forms\Components\TextInput::make('global_discount')
@@ -273,14 +291,22 @@ class RfidTagResource extends Resource
                                 if ($data['emit_invoice'] || (!$isManual && !$isCredit)) {
                                     $service = app(\App\Services\LibelulaPaymentService::class);
 
-                                    $productCode = \App\Models\Product::find($data['product_id'] ?? null)?->siat_product_code ?? '1';
+                                    $settings = \App\Models\SystemSetting::get();
+                                    $product = \App\Models\Product::find($data['product_id'] ?? null)
+                                        ?? ($settings->product_recharge_id ? \App\Models\Product::find($settings->product_recharge_id) : null)
+                                        ?? $record->product;
+
+                                    $productCode = $product?->siat_product_code ?? '1';
+                                    $productName = $product?->name ?? 'Recarga de Saldo';
+                                    $invoiceDetail = !empty($data['description']) ? $data['description'] : $productName;
+
                                     $lineItems = [
                                         [
-                                            'concepto' => 'Recarga Billetera',
+                                            'concepto' => $productName,
                                             'cantidad' => 1,
                                             'costo_unitario' => $amount,
                                             'descuento_unitario' => 0,
-                                            'detalle' => $data['description'],
+                                            'detalle' => $invoiceDetail,
                                             'codigo_producto' => $productCode,
                                             'ignora_factura' => false,
                                         ]

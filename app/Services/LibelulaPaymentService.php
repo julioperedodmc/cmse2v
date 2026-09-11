@@ -26,7 +26,7 @@ class LibelulaPaymentService
         return trim($this->apiKey) !== '';
     }
 
-    public function createPayment(Wallet $wallet, float $amount, string $description = 'Recarga Wallet', array $invoiceData = [], bool $isPaid = false, float $discount = 0): array
+    public function createPayment(Wallet $wallet, float $amount, ?string $description = null, array $invoiceData = [], bool $isPaid = false, float $discount = 0): array
     {
         if (!$this->isConfigured()) {
             return [
@@ -93,14 +93,31 @@ class LibelulaPaymentService
 
         $isCredit = $invoiceData['is_credit'] ?? false;
         $settings = \App\Models\SystemSetting::get();
-        $apiKey = (($isPaid || $isCredit) && $settings->libelula_invoicing_app_key) 
-                    ? $settings->libelula_invoicing_app_key 
-                    : $this->apiKey;
+        $apiKey = (($isPaid || $isCredit) && $settings->libelula_invoicing_app_key)
+            ? $settings->libelula_invoicing_app_key
+            : $this->apiKey;
 
-        $plateNumber = $invoiceData['vehicle_plate'] 
-            ?? $invoiceData['placa'] 
-            ?? $invoiceData['placa_vehiculo'] 
-            ?? $user?->vehicles()?->latest()?->first()?->plate 
+        // Resolve mapped product for recharge (from system settings catalog mapping)
+        $rechargeProduct = null;
+        if (!empty($settings->product_recharge_id)) {
+            $rechargeProduct = \App\Models\Product::find($settings->product_recharge_id);
+        }
+        if (!$rechargeProduct && Schema::hasTable('products')) {
+            $rechargeProduct = \App\Models\Product::where('internal_code', 'RECHARGE')->first();
+        }
+
+        $defaultProductName = $rechargeProduct?->name ?? 'Recarga de Saldo';
+        $defaultProductCode = $rechargeProduct?->siat_product_code ?? $this->resolveProductCode('RECHARGE');
+
+        // If description is empty or default generic text, use mapped product name
+        if (empty($description) || in_array($description, ['Recarga Wallet', 'Recarga Saldo', 'Manual Top-up'])) {
+            $description = $defaultProductName;
+        }
+
+        $plateNumber = $invoiceData['vehicle_plate']
+            ?? $invoiceData['placa']
+            ?? $invoiceData['placa_vehiculo']
+            ?? $user?->vehicles()?->latest()?->first()?->plate
             ?? '1111ABC';
 
         $payload = [
@@ -118,8 +135,8 @@ class LibelulaPaymentService
             'callback_url' => $returnUrl,
             'descripcion' => $description,
             'moneda' => $wallet->currency ?? 'BOB',
-            'monto' => number_format((float)$amount, 2, '.', ''),
-            'descuento_global' => number_format((float)$discount, 2, '.', ''),
+            'monto' => number_format((float) $amount, 2, '.', ''),
+            'descuento_global' => number_format((float) $discount, 2, '.', ''),
             'codigo_documento_sector' => $settings->libelula_sector_code ?? '31',
             'emite_factura' => $canInvoice,
             'lineas_metadatos' => [
@@ -132,12 +149,12 @@ class LibelulaPaymentService
 
         // Handle dynamic line items or default to single line
         if (!empty($invoiceData['line_items'])) {
-            $payload['lineas_detalle_deuda'] = array_map(function($item) {
+            $payload['lineas_detalle_deuda'] = array_map(function ($item) {
                 return [
                     'concepto' => (string) ($item['concepto'] ?? ''),
                     'cantidad' => (int) ($item['cantidad'] ?? 1),
-                    'costo_unitario' => number_format((float)($item['costo_unitario'] ?? 0), 2, '.', ''),
-                    'descuento_unitario' => number_format((float)($item['descuento_unitario'] ?? 0), 2, '.', ''),
+                    'costo_unitario' => number_format((float) ($item['costo_unitario'] ?? 0), 2, '.', ''),
+                    'descuento_unitario' => number_format((float) ($item['descuento_unitario'] ?? 0), 2, '.', ''),
                     'detalle' => (string) ($item['detalle'] ?? ''),
                     'codigo_producto' => (string) ($item['codigo_producto'] ?? '1'),
                 ];
@@ -145,12 +162,12 @@ class LibelulaPaymentService
         } else {
             $payload['lineas_detalle_deuda'] = [
                 [
-                    'concepto' => $description,
+                    'concepto' => $defaultProductName,
                     'cantidad' => (int) 1,
                     'costo_unitario' => $amount,
                     'descuento_unitario' => $discount,
-                    'detalle' => $description,
-                    'codigo_producto' => $this->resolveProductCode('RECHARGE'),
+                    'detalle' => $description ?: $defaultProductName,
+                    'codigo_producto' => $defaultProductCode,
                 ],
             ];
         }
@@ -176,10 +193,10 @@ class LibelulaPaymentService
         try {
             $logHeader = "Libelula: [TX: {$txId}] CLIENT: {$user->name} ({$user->email}) - AMOUNT: {$payload['monto']} - DISC: {$payload['descuento_global']}";
             Log::info("{$logHeader} - Registering debt...", ['url' => "{$this->baseUrl}/deuda/registrar", 'payload' => $payload]);
-            
+
             $resp = Http::timeout(20)->post("{$this->baseUrl}/deuda/registrar", $payload);
             $data = $resp->json() ?: [];
-            
+
             Log::info("{$logHeader} - Response Status: {$resp->status()}", ['data' => $data]);
 
             \App\Models\LibelulaApiLog::create([
@@ -227,11 +244,11 @@ class LibelulaPaymentService
                             $invoiceUrl = 'https://pagos.libelula.bo/factura/' . $electronicInvoices[0]['identificador'];
                         }
 
-                        $update['invoice_url'] = $invoiceUrl 
-                            ?? $data['url_factura'] 
-                            ?? $data['pdf_factura'] 
-                            ?? $data['pdf'] 
-                            ?? $data['url_sin'] 
+                        $update['invoice_url'] = $invoiceUrl
+                            ?? $data['url_factura']
+                            ?? $data['pdf_factura']
+                            ?? $data['pdf']
+                            ?? $data['url_sin']
                             ?? $data['url_cliente']
                             ?? $data['pdf_url']
                             ?? null;
@@ -242,7 +259,7 @@ class LibelulaPaymentService
 
             if ($resp->successful() && ($errorCode === 0 || $isAlreadyExists)) {
                 $paymentUrl = $data['url_pasarela_pagos'] ?? null;
-                
+
                 if ($txId) {
                     DB::table('wallet_transactions')
                         ->where('id', $txId)
@@ -296,14 +313,15 @@ class LibelulaPaymentService
     public function verifyStatus(int $txId): bool
     {
         $tx = DB::table('wallet_transactions')->where('id', $txId)->first();
-        if (!$tx) return false;
+        if (!$tx)
+            return false;
 
         $refCol = Schema::hasColumn('wallet_transactions', 'reference_id') ? 'reference_id' : 'reference';
         $localReference = $tx->{$refCol};
 
         try {
             Log::info("Libelula: Verifying status for TX {$txId}", ['ref' => $localReference]);
-            
+
             $resp = Http::timeout(10)->asForm()->post("{$this->baseUrl}/deuda/consultar", [
                 'appkey' => $this->apiKey,
                 'id' => $localReference
@@ -313,10 +331,10 @@ class LibelulaPaymentService
             $data = $resp->json() ?: [];
             Log::info("Libelula: Verification response RAW", ['status' => $resp->status(), 'body' => $rawBody]);
 
-            if ($resp->successful() && (int)($data['error'] ?? 1) === 0) {
+            if ($resp->successful() && (int) ($data['error'] ?? 1) === 0) {
                 $item = $data['datos'][0] ?? [];
-                $isPaid = (int)($item['pagado'] ?? 0) === 1;
-                
+                $isPaid = (int) ($item['pagado'] ?? 0) === 1;
+
                 if ($isPaid) {
                     $payloadToPass = array_merge($item, [
                         'facturas_electronicas' => $data['facturas_electronicas'] ?? ($item['facturas_electronicas'] ?? null),
@@ -350,30 +368,36 @@ class LibelulaPaymentService
         $refCol = Schema::hasColumn('wallet_transactions', 'reference_id') ? 'reference_id' : 'reference';
 
         foreach ($candidateIds as $cid) {
-            if (empty($cid)) continue;
+            if (empty($cid))
+                continue;
 
             $tx = DB::table('wallet_transactions')->where($refCol, (string) $cid)->first();
-            if ($tx) break;
+            if ($tx)
+                break;
 
             if (is_string($cid) && str_contains($cid, '-')) {
                 $tx = DB::table('wallet_transactions')->where($refCol, $cid)->first();
-                if ($tx) break;
+                if ($tx)
+                    break;
 
                 $parts = explode('-', $cid);
                 foreach ($parts as $p) {
                     if (is_numeric($p)) {
                         $tx = DB::table('wallet_transactions')->where($refCol, (string) $p)->first();
-                        if ($tx) break 2;
-                        
+                        if ($tx)
+                            break 2;
+
                         $tx = DB::table('wallet_transactions')->where('id', (int) $p)->first();
-                        if ($tx) break 2;
+                        if ($tx)
+                            break 2;
                     }
                 }
             }
 
             if (is_numeric($cid)) {
                 $tx = DB::table('wallet_transactions')->where('id', (int) $cid)->first();
-                if ($tx) break;
+                if ($tx)
+                    break;
             }
         }
 
@@ -406,25 +430,25 @@ class LibelulaPaymentService
             if ($tx->payment_method === 'CREDITO') {
                 $invoiceUrlCol = Schema::hasColumn('wallet_transactions', 'invoice_url');
                 $invoiceNumberCol = Schema::hasColumn('wallet_transactions', 'invoice_number');
-                
+
                 $updateInvoice = [];
-                
+
                 if ($invoiceNumberCol && empty($tx->invoice_number)) {
                     $updateInvoice['invoice_number'] = $payload['invoice_number']
                         ?? $payload['nro_factura']
                         ?? $payload['numero_factura']
                         ?? null;
                 }
-                
+
                 if ($invoiceUrlCol && empty($tx->invoice_url)) {
                     $electronicInvoices = $payload['facturas_electronicas'] ?? $payload['data']['facturas_electronicas'] ?? [];
                     $invoiceUrl = !empty($electronicInvoices) ? ($electronicInvoices[0]['url'] ?? null) : null;
-                    
+
                     if (!$invoiceUrl && !empty($electronicInvoices) && !empty($electronicInvoices[0]['identificador'])) {
                         $invoiceUrl = 'https://pagos.libelula.bo/factura/' . $electronicInvoices[0]['identificador'];
                     }
 
-                    $updateInvoice['invoice_url'] = $invoiceUrl 
+                    $updateInvoice['invoice_url'] = $invoiceUrl
                         ?? $payload['invoice_url']
                         ?? $payload['factura_url']
                         ?? $payload['url_factura']
@@ -435,12 +459,12 @@ class LibelulaPaymentService
                         ?? $payload['url_factura_electronica']
                         ?? null;
                 }
-                
+
                 if (!empty($updateInvoice)) {
-                    $filteredUpdate = array_filter($updateInvoice, function($val) {
+                    $filteredUpdate = array_filter($updateInvoice, function ($val) {
                         return !is_null($val) && $val !== '';
                     });
-                    
+
                     if (!empty($filteredUpdate)) {
                         $filteredUpdate['updated_at'] = now();
                         DB::table('wallet_transactions')->where('id', $txId)->update($filteredUpdate);
@@ -454,25 +478,25 @@ class LibelulaPaymentService
             if ($statusCol && strtoupper((string) $tx->{$statusCol}) === 'COMPLETED') {
                 $invoiceUrlCol = Schema::hasColumn('wallet_transactions', 'invoice_url');
                 $invoiceNumberCol = Schema::hasColumn('wallet_transactions', 'invoice_number');
-                
+
                 $updateInvoice = [];
-                
+
                 if ($invoiceNumberCol && empty($tx->invoice_number)) {
                     $updateInvoice['invoice_number'] = $payload['invoice_number']
                         ?? $payload['nro_factura']
                         ?? $payload['numero_factura']
                         ?? null;
                 }
-                
+
                 if ($invoiceUrlCol && empty($tx->invoice_url)) {
                     $electronicInvoices = $payload['facturas_electronicas'] ?? $payload['data']['facturas_electronicas'] ?? [];
                     $invoiceUrl = !empty($electronicInvoices) ? ($electronicInvoices[0]['url'] ?? null) : null;
-                    
+
                     if (!$invoiceUrl && !empty($electronicInvoices) && !empty($electronicInvoices[0]['identificador'])) {
                         $invoiceUrl = 'https://pagos.libelula.bo/factura/' . $electronicInvoices[0]['identificador'];
                     }
 
-                    $updateInvoice['invoice_url'] = $invoiceUrl 
+                    $updateInvoice['invoice_url'] = $invoiceUrl
                         ?? $payload['invoice_url']
                         ?? $payload['factura_url']
                         ?? $payload['url_factura']
@@ -483,12 +507,12 @@ class LibelulaPaymentService
                         ?? $payload['url_factura_electronica']
                         ?? null;
                 }
-                
+
                 if (!empty($updateInvoice)) {
-                    $filteredUpdate = array_filter($updateInvoice, function($val) {
+                    $filteredUpdate = array_filter($updateInvoice, function ($val) {
                         return !is_null($val) && $val !== '';
                     });
-                    
+
                     if (!empty($filteredUpdate)) {
                         $filteredUpdate['updated_at'] = now();
                         DB::table('wallet_transactions')->where('id', $txId)->update($filteredUpdate);
@@ -516,10 +540,10 @@ class LibelulaPaymentService
             }
 
             $method = $payload['payment_method']
-                ?? $payload['metodo_pago'] 
-                ?? $payload['medio_pago'] 
-                ?? $payload['tipo_pago'] 
-                ?? $payload['glosa_metodo_pago'] 
+                ?? $payload['metodo_pago']
+                ?? $payload['medio_pago']
+                ?? $payload['tipo_pago']
+                ?? $payload['glosa_metodo_pago']
                 ?? $payload['glosa_pago']
                 ?? 'LIBELULA';
 
@@ -546,12 +570,12 @@ class LibelulaPaymentService
             if (Schema::hasColumn('wallet_transactions', 'invoice_url')) {
                 $electronicInvoices = $payload['facturas_electronicas'] ?? $payload['data']['facturas_electronicas'] ?? [];
                 $invoiceUrl = !empty($electronicInvoices) ? ($electronicInvoices[0]['url'] ?? null) : null;
-                
+
                 if (!$invoiceUrl && !empty($electronicInvoices) && !empty($electronicInvoices[0]['identificador'])) {
                     $invoiceUrl = 'https://pagos.libelula.bo/factura/' . $electronicInvoices[0]['identificador'];
                 }
 
-                $update['invoice_url'] = $invoiceUrl 
+                $update['invoice_url'] = $invoiceUrl
                     ?? $payload['invoice_url']
                     ?? $payload['factura_url']
                     ?? $payload['url_factura']
@@ -593,9 +617,9 @@ class LibelulaPaymentService
         $user = $tx->user;
         $amount = round($amount, 2);
 
-        $plate = $tx->metadata['vehicle_plate'] 
-            ?? $tx->metadata['placa'] 
-            ?? $user?->vehicles()?->latest()?->first()?->plate 
+        $plate = $tx->metadata['vehicle_plate']
+            ?? $tx->metadata['placa']
+            ?? $user?->vehicles()?->latest()?->first()?->plate
             ?? '1111ABC';
 
         $payload = [
@@ -610,7 +634,7 @@ class LibelulaPaymentService
             'codigo_tipo_documento' => $this->resolveDocType($tx->metadata['documento'] ?? $user->billing_document ?? '0'),
             'complemento_documento' => '',
             'descuento_global' => (string) round($discount, 2),
-            
+
             'canal_caja' => $settings->libelula_canal_caja ?: env('LIBELULA_CANAL_CAJA', '23955c77e357e4c5da69917858462130b124019b9c9f3c3b6a70b55b6e4464cd'),
             'canal_caja_sucursal' => $settings->libelula_canal_caja_sucursal ?: 'SUCURSAL 1',
             'canal_caja_usuario' => $settings->libelula_canal_caja_usuario ?: 'CAJERO 1',
@@ -625,7 +649,7 @@ class LibelulaPaymentService
             'pago_realizado' => true,
             'monto' => (string) round($amount, 2),
 
-            'lineas_detalle_deuda' => !empty($lineItems) ? array_map(function($item) {
+            'lineas_detalle_deuda' => !empty($lineItems) ? array_map(function ($item) {
                 return [
                     'concepto' => (string) ($item['concepto'] ?? ''),
                     'cantidad' => (int) ($item['cantidad'] ?? 1),
@@ -649,10 +673,10 @@ class LibelulaPaymentService
         try {
             $logHeader = "Libelula: [TX: {$tx->id}] CLIENT: {$user->name} - AMOUNT: {$payload['monto']} - Manual Invoice";
             Log::info("{$logHeader} Request", ['payload' => $payload]);
-            
+
             $resp = Http::timeout(20)->post("{$this->baseUrl}/deuda/registrar", $payload);
             $data = $resp->json() ?: [];
-            
+
             Log::info("{$logHeader} Response - Status: {$resp->status()}", ['data' => $data]);
 
             \App\Models\LibelulaApiLog::create([
@@ -666,7 +690,7 @@ class LibelulaPaymentService
 
             if ($resp->successful() && (int) ($data['error'] ?? 1) === 0) {
                 $this->markCompleted($tx->id, array_merge($data, ['payment_method' => 'MANUAL_CASH']));
-                
+
                 $electronicInvoices = $data['data']['facturas_electronicas'] ?? [];
                 $invoiceUrl = !empty($electronicInvoices) ? ($electronicInvoices[0]['url'] ?? null) : null;
                 if (!$invoiceUrl && !empty($electronicInvoices) && !empty($electronicInvoices[0]['identificador'])) {
@@ -675,14 +699,14 @@ class LibelulaPaymentService
 
                 return [
                     'success' => true,
-                    'invoice_url' => $invoiceUrl 
-                                        ?? $data['url_factura'] 
-                                        ?? $data['pdf_factura'] 
-                                        ?? $data['pdf'] 
-                                        ?? $data['url_sin']
-                                        ?? $data['url_cliente']
-                                        ?? $data['pdf_url']
-                                        ?? null,
+                    'invoice_url' => $invoiceUrl
+                        ?? $data['url_factura']
+                        ?? $data['pdf_factura']
+                        ?? $data['pdf']
+                        ?? $data['url_sin']
+                        ?? $data['url_cliente']
+                        ?? $data['pdf_url']
+                        ?? null,
                     'message' => 'Factura emitida correctamente'
                 ];
             }
@@ -705,7 +729,7 @@ class LibelulaPaymentService
         }
 
         $settings = \App\Models\SystemSetting::get();
-        
+
         $payload = [
             'appkey' => $this->apiKey,
             'identificador' => "TEST-" . now()->timestamp,
@@ -718,7 +742,7 @@ class LibelulaPaymentService
             'codigo_tipo_documento' => $this->resolveDocType($payloadData['numero_documento'] ?? '1234567'),
             'complemento_documento' => '',
             'descuento_global' => (string) round((float) ($payloadData['descuento_global'] ?? 0), 2),
-            
+
             'canal_caja' => $settings->libelula_canal_caja ?: env('LIBELULA_CANAL_CAJA', '23955c77e357e4c5da69917858462130b124019b9c9f3c3b6a70b55b6e4464cd'),
             'canal_caja_sucursal' => $settings->libelula_canal_caja_sucursal ?: 'SUCURSAL 1',
             'canal_caja_usuario' => $settings->libelula_canal_caja_usuario ?: 'CAJERO 1',
@@ -749,7 +773,7 @@ class LibelulaPaymentService
 
         try {
             $response = Http::timeout(30)->post($this->baseUrl . '/deuda/registrar', $payload);
-            
+
             Log::info('Libelula Debug Response', [
                 'status' => $response->status(),
                 'body' => $response->json()
@@ -781,7 +805,7 @@ class LibelulaPaymentService
     private function resolveProductCode(?string $internalCode = 'RECHARGE'): string
     {
         $settings = \App\Models\SystemSetting::get();
-        
+
         try {
             $mappedProductId = null;
             if ($internalCode === 'RECHARGE') {
@@ -805,7 +829,7 @@ class LibelulaPaymentService
                 $product = \App\Models\Product::where('internal_code', $internalCode)
                     ->orWhere('name', 'LIKE', "%{$internalCode}%")
                     ->first();
-                
+
                 if ($product && $product->siat_product_code) {
                     return $product->siat_product_code;
                 }
@@ -819,7 +843,8 @@ class LibelulaPaymentService
 
     private function resolveDocType(?string $doc): string
     {
-        if (!$doc) return 'CI';
+        if (!$doc)
+            return 'CI';
         $doc = preg_replace('/[^0-9]/', '', $doc);
         return (strlen($doc) > 9) ? 'NIT' : 'CI';
     }

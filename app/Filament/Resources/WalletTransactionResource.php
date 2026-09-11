@@ -65,9 +65,16 @@ class WalletTransactionResource extends Resource
             ]);
     }
 
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->with(['user', 'wallet']);
+    }
+
     public static function table(Table $table): Table
     {
         return $table
+            ->paginationPageOptions([10, 25, 50, 100])
+            ->defaultPaginationPageOption(25)
             ->columns([
                 Tables\Columns\TextColumn::make('id')
                     ->label('ID')
