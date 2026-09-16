@@ -35,4 +35,9 @@ return [
         ],
     ],
 
+    'fcm' => [
+        'project_id' => env('FIREBASE_PROJECT_ID', 'electropoint-8c3d1'),
+        'credentials_path' => env('FIREBASE_CREDENTIALS', storage_path('app/firebase-credentials.json')),
+    ],
+
 ];

@@ -20,6 +20,13 @@ class StationController extends Controller
     public function index()
     {
         try {
+            // Live-sync state from Steve server on index requests
+            try {
+                \Illuminate\Support\Facades\Artisan::call('steve:sync-status');
+            } catch (\Throwable $te) {
+                \Log::warning("Live sync status failed: " . $te->getMessage());
+            }
+
             $stations = Station::with(['location', 'connectors' => function($query) {
                 $query->where('connector_id', '>', 0);
             }])

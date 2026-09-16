@@ -1,0 +1,9 @@
+tunnel: 7a0628cd-c95f-4af3-b29d-629dd56a913a
+credentials-file: /home/nonroot/.cloudflared/7a0628cd-c95f-4af3-b29d-629dd56a913a.json
+
+ingress:
+  - hostname: epservice.dmc.bo
+    service: http://steve-cms-app:8080
+  - hostname: epc.dmc.bo
+    service: http://192.168.5.18:8181
+  - service: http_status:404

@@ -57,6 +57,7 @@ class AuthController extends Controller
                 'billing_document' => 'required|numeric|digits_between:5,15|unique:users',
                 'billing_razon_social' => 'sometimes|nullable|string|max:255',
                 'billing_doc_type' => 'sometimes|nullable|in:CI,NIT',
+                'phone' => 'sometimes|nullable|string|max:30',
             ], [
                 'name.required' => 'El nombre es obligatorio.',
                 'name.regex' => 'El nombre solo debe contener letras y espacios.',
@@ -92,6 +93,7 @@ class AuthController extends Controller
                 'billing_document' => $request->billing_document,
                 'billing_razon_social' => $request->billing_razon_social,
                 'billing_doc_type' => $request->billing_doc_type ?: 'NIT',
+                'phone' => $request->phone,
             ]);
 
             // Ensure mobile default role exists and assign it
@@ -270,6 +272,7 @@ class AuthController extends Controller
             ],
             'billing_razon_social' => 'sometimes|nullable|string|max:255',
             'billing_doc_type' => 'sometimes|nullable|in:CI,NIT,OTHER',
+            'phone' => 'sometimes|nullable|string|max:30',
             'password' => 'sometimes|nullable|filled|string|min:8|confirmed',
         ], [
             'name.regex' => 'El nombre solo debe contener letras y espacios.',
@@ -283,6 +286,8 @@ class AuthController extends Controller
 
         if ($request->has('name'))
             $user->name = $request->name;
+        if ($request->has('phone'))
+            $user->phone = $request->phone;
         if ($request->has('billing_document'))
             $user->billing_document = $request->billing_document;
         if ($request->has('billing_razon_social'))

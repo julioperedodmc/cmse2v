@@ -65,10 +65,21 @@ class WalletTransactionResource extends Resource
             ]);
     }
 
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->with(['user', 'wallet']);
+    }
+
     public static function table(Table $table): Table
     {
         return $table
+            ->paginationPageOptions([10, 25, 50, 100])
+            ->defaultPaginationPageOption(25)
             ->columns([
+                Tables\Columns\TextColumn::make('id')
+                    ->label('ID')
+                    ->searchable()
+                    ->sortable(),
                 Tables\Columns\TextColumn::make('created_at')
                     ->label('Date')
                     ->dateTime('d M H:i', 'America/La_Paz')
@@ -89,6 +100,7 @@ class WalletTransactionResource extends Resource
                         'RECHARGE' => 'success',
                         'CHARGE' => 'danger',
                         'REFUND' => 'warning',
+                        'CREDIT' => 'warning',
                         default => 'gray',
                     }),
                 Tables\Columns\TextColumn::make('amount')
@@ -129,7 +141,20 @@ class WalletTransactionResource extends Resource
             ])
             ->defaultSort('created_at', 'desc')
             ->filters([
-                //
+                Tables\Filters\SelectFilter::make('type')
+                    ->options([
+                        'RECHARGE' => 'Recarga (Recharge)',
+                        'CHARGE' => 'Consumo/Cobro (Charge)',
+                        'CREDIT' => 'Reembolso (Credit)',
+                    ])
+                    ->label('Tipo de Transacción'),
+                Tables\Filters\SelectFilter::make('status')
+                    ->options([
+                        'COMPLETED' => 'Completado',
+                        'PENDING' => 'Pendiente',
+                        'FAILED' => 'Fallido',
+                    ])
+                    ->label('Estado (Status)'),
             ])
             ->actions([
                 Tables\Actions\ViewAction::make(),
@@ -237,7 +262,13 @@ class WalletTransactionResource extends Resource
                     ->visible(fn($record) => !empty($record->payment_url) && $record->status === 'PENDING'),
             ])
             ->bulkActions([
-                //
+                Tables\Actions\BulkActionGroup::make([
+                    \pxlrbt\FilamentExcel\Actions\Tables\ExportBulkAction::make(),
+                ]),
+            ])
+            ->headerActions([
+                \pxlrbt\FilamentExcel\Actions\Tables\ExportAction::make()
+                    ->label('Exportar Excel'),
             ]);
     }
 

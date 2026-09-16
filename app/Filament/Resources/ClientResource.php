@@ -62,14 +62,25 @@ class ClientResource extends Resource
                             ->dehydrateStateUsing(fn ($state) => bcrypt($state))
                             ->maxLength(255),
                     ])->columns(2),
-                Forms\Components\Section::make('Facturación')
+                Forms\Components\Section::make('Empresa y Facturación')
                     ->schema([
+                        Forms\Components\Select::make('company_id')
+                            ->label('Empresa Corporativa / Flota')
+                            ->relationship('company', 'name')
+                            ->searchable()
+                            ->preload()
+                            ->nullable()
+                            ->helperText('Asociar a una empresa (ej. TAIYO MOTORS, SACI, HANSA, IMCRUZ). Dejar vacío si es cliente particular B2C.'),
                         Forms\Components\Select::make('billing_doc_type')
-                            ->options(['NIT' => 'NIT', 'CI' => 'CI']),
+                            ->label('Tipo de Documento')
+                            ->options(['NIT' => 'NIT', 'CI' => 'CI', 'CUE' => 'CUE']),
                         Forms\Components\TextInput::make('billing_document')
-                            ->label('NIT/CI')
+                            ->label('NIT/CI (Facturación SIAT)')
                             ->unique(ignoreRecord: true),
-                    ])->columns(3),
+                        Forms\Components\TextInput::make('billing_razon_social')
+                            ->label('Razón Social para Factura')
+                            ->maxLength(255),
+                    ])->columns(2),
             ]);
     }
 
@@ -85,12 +96,15 @@ class ClientResource extends Resource
                         Infolists\Components\TextEntry::make('created_at')->label('Fecha Registro')->dateTime(),
                     ])->columns(2),
                 
-                Infolists\Components\Section::make('Facturación')
+                Infolists\Components\Section::make('Empresa y Facturación')
                     ->schema([
+                        Infolists\Components\TextEntry::make('company.name')
+                            ->label('Empresa Corporativa')
+                            ->placeholder('Ninguna (Cliente B2C)'),
                         Infolists\Components\TextEntry::make('billing_doc_type')->label('Tipo Doc'),
                         Infolists\Components\TextEntry::make('billing_document')->label('Documento'),
                         Infolists\Components\TextEntry::make('billing_razon_social')->label('Razón Social'),
-                    ])->columns(3),
+                    ])->columns(2),
 
                 Infolists\Components\Section::make('Tarjetas / Identificación')
                     ->schema([
@@ -144,21 +158,45 @@ class ClientResource extends Resource
             ->columns([
                 Tables\Columns\TextColumn::make('name')
                     ->label('Nombre')
-                    ->searchable(),
+                    ->searchable()
+                    ->sortable(),
                 Tables\Columns\TextColumn::make('email')
                     ->label('Email')
+                    ->searchable()
+                    ->sortable(),
+                Tables\Columns\TextColumn::make('company.name')
+                    ->label('Empresa')
+                    ->searchable()
+                    ->sortable()
+                    ->badge()
+                    ->color(fn ($state) => $state ? 'info' : 'gray')
+                    ->placeholder('Ninguna (B2C)'),
+                Tables\Columns\TextColumn::make('billing_document')
+                    ->label('NIT/CI')
+                    ->searchable(),
+                Tables\Columns\TextColumn::make('billing_razon_social')
+                    ->label('Razón Social')
                     ->searchable(),
                 Tables\Columns\TextColumn::make('phone')
-                    ->label('Teléfono'),
-                Tables\Columns\TextColumn::make('billing_document')
-                    ->label('Documento'),
+                    ->label('Teléfono')
+                    ->searchable(),
                 Tables\Columns\TextColumn::make('created_at')
                     ->label('Registrado el')
                     ->dateTime()
                     ->sortable(),
             ])
             ->filters([
-                //
+                Tables\Filters\SelectFilter::make('company_id')
+                    ->label('Filtrar por Empresa')
+                    ->relationship('company', 'name')
+                    ->searchable()
+                    ->preload(),
+                Tables\Filters\Filter::make('is_corporate')
+                    ->label('Solo Empresas Corporativas')
+                    ->query(fn (Builder $query) => $query->whereNotNull('company_id')),
+                Tables\Filters\Filter::make('is_b2c')
+                    ->label('Solo Particulares B2C')
+                    ->query(fn (Builder $query) => $query->whereNull('company_id')),
             ])
             ->actions([
                 Tables\Actions\ViewAction::make(),
@@ -197,7 +235,12 @@ class ClientResource extends Resource
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
                     Tables\Actions\DeleteBulkAction::make(),
+                    \pxlrbt\FilamentExcel\Actions\Tables\ExportBulkAction::make(),
                 ]),
+            ])
+            ->headerActions([
+                \pxlrbt\FilamentExcel\Actions\Tables\ExportAction::make()
+                    ->label('Exportar Excel'),
             ]);
     }
 

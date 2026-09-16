@@ -23,10 +23,10 @@ class Tariff extends Model
             if ($tariff->hasBeenUsed()) {
                 $dirty = array_keys($tariff->getDirty());
                 $allowed = [
-                    'valid_until', 
-                    'updated_at', 
-                    'energy_product_id', 
-                    'connection_product_id', 
+                    'valid_until',
+                    'updated_at',
+                    'energy_product_id',
+                    'connection_product_id',
                     'time_product_id'
                 ];
                 $blocked = array_values(array_diff($dirty, $allowed));
@@ -78,7 +78,11 @@ class Tariff extends Model
         'valid_from',
         'valid_until',
         // Block 1
-        'b1_start', 'b1_end', 'b1_price_kwh', 'b1_cost_kwh', 'b1_price_min',
+        'b1_start',
+        'b1_end',
+        'b1_price_kwh',
+        'b1_cost_kwh',
+        'b1_price_min',
         'is_time_fee_enabled',
         'discount_fixed_amount',
         'apply_discount_to_cards',
@@ -86,11 +90,23 @@ class Tariff extends Model
         'target_soc',
         'soc_reached_message',
         // Block 2
-        'b2_start', 'b2_end', 'b2_price_kwh', 'b2_cost_kwh', 'b2_price_min',
+        'b2_start',
+        'b2_end',
+        'b2_price_kwh',
+        'b2_cost_kwh',
+        'b2_price_min',
         // Block 3
-        'b3_start', 'b3_end', 'b3_price_kwh', 'b3_cost_kwh', 'b3_price_min',
+        'b3_start',
+        'b3_end',
+        'b3_price_kwh',
+        'b3_cost_kwh',
+        'b3_price_min',
         // Block 4
-        'b4_start', 'b4_end', 'b4_price_kwh', 'b4_cost_kwh', 'b4_price_min',
+        'b4_start',
+        'b4_end',
+        'b4_price_kwh',
+        'b4_cost_kwh',
+        'b4_price_min',
         // Product Linkage
         'energy_product_id',
         'connection_product_id',
@@ -186,16 +202,19 @@ class Tariff extends Model
         // 1. Try assigned station tariff (if within window)
         if ($station && $station->tariff_id) {
             $assigned = self::where('id', $station->tariff_id)->where($inWindow)->first();
-            if ($assigned) return $assigned;
+            if ($assigned)
+                return $assigned;
         }
 
         // 2. Try any other tariff within window
         $global = self::where($inWindow)->orderByDesc('valid_from')->first();
-        if ($global) return $global;
+        if ($global)
+            return $global;
 
         // 3. Fallback: Use the most recently expired tariff (as requested)
         $latestExpired = self::where('valid_until', '<', $ts)->orderByDesc('valid_until')->first();
-        if ($latestExpired) return $latestExpired;
+        if ($latestExpired)
+            return $latestExpired;
 
         // 4. Absolute fallback
         return self::first();

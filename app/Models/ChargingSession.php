@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ChargingSession extends Model
 {
@@ -83,6 +84,11 @@ class ChargingSession extends Model
     public function meterValues()
     {
         return $this->hasMany(\App\Models\Steve\ConnectorMeterValue::class, 'transaction_pk', 'transaction_id')->orderBy('value_timestamp', 'desc');
+    }
+
+    public function sessionNotifications(): HasMany
+    {
+        return $this->hasMany(ChargingSessionNotification::class, 'charging_session_id');
     }
 
     public function product(): BelongsTo
