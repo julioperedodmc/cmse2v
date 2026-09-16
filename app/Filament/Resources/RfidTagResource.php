@@ -90,11 +90,11 @@ class RfidTagResource extends Resource
                     ->searchable(),
                 Tables\Columns\TextColumn::make('user.name')
                     ->label('Usuario')
-                    ->numeric()
+                    ->searchable()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('company.name')
                     ->label('Empresa')
-                    ->numeric()
+                    ->searchable()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('name')
                     ->label('Nombre')
@@ -156,8 +156,8 @@ class RfidTagResource extends Resource
                             ->searchable()
                             ->preload()
                             ->required()
-                            ->default(function () use ($record) {
-                                return $record->product_id
+                            ->default(function (?RfidTag $record = null) {
+                                return $record?->product_id
                                     ?? \App\Models\SystemSetting::get()->product_recharge_id
                                     ?? \App\Models\Product::where('internal_code', 'RECHARGE')->first()?->id
                                     ?? \App\Models\Product::first()?->id;
@@ -212,9 +212,9 @@ class RfidTagResource extends Resource
                             ->label('Motivo / Descripción')
                             ->required()
                             ->maxLength(255)
-                            ->default(function () use ($record) {
+                            ->default(function (?RfidTag $record = null) {
                                 $settings = \App\Models\SystemSetting::get();
-                                $productId = $record->product_id ?? $settings->product_recharge_id;
+                                $productId = $record?->product_id ?? $settings->product_recharge_id;
                                 $product = $productId ? \App\Models\Product::find($productId) : null;
                                 return $product?->name ?? 'Recarga de Saldo';
                             })
