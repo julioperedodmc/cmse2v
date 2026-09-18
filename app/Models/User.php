@@ -91,9 +91,12 @@ class User extends Authenticatable implements \Filament\Models\Contracts\Filamen
      * @var list<string>
      */
     protected $fillable = [
+        'company_id',
+        'is_admin',
         'name',
         'email',
         'password',
+        'phone',
         'billing_document',
         'billing_doc_type',
         'billing_complement',
@@ -101,7 +104,6 @@ class User extends Authenticatable implements \Filament\Models\Contracts\Filamen
         'sap_client_code',
         'sap_synced_at',
         'fcm_token',
-        'phone',
     ];
 
     /**

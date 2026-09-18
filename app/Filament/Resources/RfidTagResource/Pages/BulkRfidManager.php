@@ -62,6 +62,7 @@ class BulkRfidManager extends Page
                                     ->numeric()
                                     ->default(1)
                                     ->required()
+
                                     ->live(),
                                 TextInput::make('card_discount')
                                     ->label('Descuento de Tarjeta (BOB)')
@@ -116,10 +117,20 @@ class BulkRfidManager extends Page
                                         if ($state) {
                                             $company = Company::find($state);
                                             if ($company) {
-                                                $set('new_user_name', $company->name);
-                                                $set('new_user_email', $company->email);
-                                                $set('billing_razon_social', $company->name);
-                                                $set('billing_document', $company->tax_id);
+                                                // Prioritize loading the existing user already assigned to this company
+                                                $existingUser = User::where('company_id', $state)->first();
+
+                                                if ($existingUser) {
+                                                    $set('new_user_name', $existingUser->name);
+                                                    $set('new_user_email', $existingUser->email);
+                                                    $set('billing_razon_social', $existingUser->billing_razon_social ?: $company->name);
+                                                    $set('billing_document', $existingUser->billing_document ?: $company->tax_id);
+                                                } else {
+                                                    $set('new_user_name', $company->name);
+                                                    $set('new_user_email', $company->email);
+                                                    $set('billing_razon_social', $company->name);
+                                                    $set('billing_document', $company->tax_id);
+                                                }
                                             }
                                         }
                                     }),
@@ -130,7 +141,8 @@ class BulkRfidManager extends Page
                                 TextInput::make('new_user_email')
                                     ->label('Correo Electrónico')
                                     ->email()
-                                    ->required(),
+                                    ->required()
+                                    ->helperText('Si la empresa ya tiene un usuario registrado, se utilizará su cuenta para vincular el lote.'),
                                 TextInput::make('billing_razon_social')
                                     ->label('Razón Social'),
                                 TextInput::make('billing_document')
@@ -153,16 +165,16 @@ class BulkRfidManager extends Page
                                     ->label('Emitir Factura Oficial (Libélula)')
                                     ->default(fn() => \App\Models\SystemSetting::get()->invoice_on_bulk_creation)
                                     ->live(),
-                                
+
                                 TextInput::make('vehicle_plate')
                                     ->label('Placa de Vehículo')
                                     ->default('1111ABC')
                                     ->helperText('Placa a reportar en la factura del lote. Se permite ingresar "0000000" u otro formato de placa.')
-                                    ->visible(fn (callable $get) => $get('emit_invoice')),
-                                
+                                    ->visible(fn(callable $get) => $get('emit_invoice')),
+
                                 Select::make('payment_method')
                                     ->label('Método de Pago')
-                                    ->options(fn (callable $get) => $get('emit_invoice') ? [
+                                    ->options(fn(callable $get) => $get('emit_invoice') ? [
                                         'manual' => 'Efectivo / Manual (Caja)',
                                         'libelula' => 'Pasarela de Pago (QR/Tarjeta)',
                                         'credit' => 'A Crédito (Activa saldo de inmediato)',
@@ -172,7 +184,7 @@ class BulkRfidManager extends Page
                                     ])
                                     ->default('manual')
                                     ->required(),
-                                
+
                                 TextInput::make('global_discount')
                                     ->label('Descuento Global (BOB)')
                                     ->numeric()
@@ -217,17 +229,57 @@ class BulkRfidManager extends Page
 
             // Scenario: Single corporate user for the whole batch
             if ($assignmentType === 'corporate') {
-                $sharedUser = User::create([
-                    'name' => $inputData['new_user_name'],
-                    'email' => $inputData['new_user_email'],
-                    'password' => Hash::make(Str::random(12)),
-                    'billing_razon_social' => $inputData['billing_razon_social'],
-                    'billing_document' => $inputData['billing_document'],
-                    'company_id' => $companyId,
-                    'is_admin' => false,
-                ]);
-                $sharedUser->assignRole('client');
+                $sharedUser = null;
+                if ($companyId) {
+                    $sharedUser = User::where('company_id', $companyId)->first();
+                }
+
+                if (!$sharedUser && !empty($inputData['new_user_email'])) {
+                    $sharedUser = User::where('email', $inputData['new_user_email'])->first();
+                }
+
+                if ($sharedUser) {
+                    $updateData = [];
+                    if (!empty($inputData['billing_razon_social'])) {
+                        $updateData['billing_razon_social'] = $inputData['billing_razon_social'];
+                    }
+                    if (!empty($inputData['billing_document'])) {
+                        $updateData['billing_document'] = $inputData['billing_document'];
+                    }
+                    if ($companyId && !$sharedUser->company_id) {
+                        $updateData['company_id'] = $companyId;
+                    }
+                    if (!empty($updateData)) {
+                        $sharedUser->update($updateData);
+                    }
+                } else {
+                    $targetEmail = $inputData['new_user_email'];
+                    if (User::where('email', $targetEmail)->exists()) {
+                        $company = Company::find($companyId);
+                        $slug = Str::slug($company?->name ?? 'empresa');
+                        $targetEmail = "corp_{$slug}_{$companyId}@dmc.bo";
+                    }
+
+                    $sharedUser = User::create([
+                        'name' => $inputData['new_user_name'],
+                        'email' => $targetEmail,
+                        'password' => Hash::make(Str::random(12)),
+                        'billing_razon_social' => $inputData['billing_razon_social'] ?? null,
+                        'billing_document' => $inputData['billing_document'] ?? null,
+                        'company_id' => $companyId,
+                        'is_admin' => false,
+                    ]);
+                }
+
+                if (!$sharedUser->hasRole('client')) {
+                    $sharedUser->assignRole('client');
+                }
                 $sharedUserId = $sharedUser->id;
+            } elseif ($assignmentType === 'existing' && $selectedUserId) {
+                $existingUser = User::find($selectedUserId);
+                if ($existingUser && !$companyId) {
+                    $companyId = $existingUser->company_id;
+                }
             }
 
             $allLineItems = [];
@@ -237,11 +289,11 @@ class BulkRfidManager extends Page
             foreach ($codes as $code) {
                 // Standardize to 8 characters (remove colons, padding, etc)
                 $code = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $code));
-                
+
                 if (strlen($code) > 8) {
                     $code = substr($code, -8);
                 }
-                
+
                 if (RfidTag::where('tag_code', $code)->exists()) {
                     $errorCount++;
                     continue;
@@ -250,15 +302,22 @@ class BulkRfidManager extends Page
                 $userId = $selectedUserId;
 
                 if ($assignmentType === 'individual') {
-                    // One new user per tag
-                    $user = User::create([
-                        'name' => "Usuario RFID $code",
-                        'email' => "rfid_$code@evce.temp",
-                        'password' => Hash::make(Str::random(12)),
-                        'company_id' => $companyId,
-                        'is_admin' => false,
-                    ]);
-                    $user->assignRole('client');
+                    // One new user per tag (or reuse if already exists)
+                    $user = User::firstOrCreate(
+                        ['email' => "rfid_$code@evce.temp"],
+                        [
+                            'name' => "Usuario RFID $code",
+                            'password' => Hash::make(Str::random(12)),
+                            'company_id' => $companyId,
+                            'is_admin' => false,
+                        ]
+                    );
+                    if ($companyId && !$user->company_id) {
+                        $user->update(['company_id' => $companyId]);
+                    }
+                    if (!$user->hasRole('client')) {
+                        $user->assignRole('client');
+                    }
                     $userId = $user->id;
                 } elseif ($assignmentType === 'corporate') {
                     $userId = $sharedUserId;
@@ -269,9 +328,9 @@ class BulkRfidManager extends Page
                     'tag_code' => $code,
                     'user_id' => $userId,
                     'company_id' => $companyId,
-                    'product_id' => $cardProductId, 
+                    'product_id' => $cardProductId,
                     'name' => "Tarjeta $code",
-                    'balance' => $credit, 
+                    'balance' => $credit,
                     'currency' => 'BOB',
                     'is_active' => true,
                 ]);
@@ -293,7 +352,7 @@ class BulkRfidManager extends Page
                     ];
                     $tagTotal += max(0, $cardPrice - $cardDiscount);
                 }
-                
+
                 if ($credit > 0) {
                     $rechargeSiatCode = \App\Models\Product::find($rechargeProductId)?->siat_product_code ?? '1';
                     $tagLineItems[] = [
@@ -331,7 +390,7 @@ class BulkRfidManager extends Page
                             'description' => " Venta tarjeta RFID $code",
                             'payment_method' => $isManual ? 'MANUAL_CASH' : ($isCredit ? 'CREDITO' : 'LIBELULA'),
                             'metadata' => [
-                                'rfid_tag' => $code, 
+                                'rfid_tag' => $code,
                                 'line_items' => $tagLineItems,
                                 'should_invoice' => $inputData['emit_invoice'] ?? false,
                                 'skip_wallet_update' => true, // Since the tag was already credited
@@ -342,17 +401,17 @@ class BulkRfidManager extends Page
                         if ($inputData['emit_invoice'] ?? false) {
                             $isCredit = ($inputData['payment_method'] ?? 'manual') === 'credit';
                             $isManual = ($inputData['payment_method'] ?? 'manual') === 'manual';
-                            
+
                             // For manual and credit, we want to emit invoice immediately (isPaid = true for manual, but for credit we pass is_credit = true)
                             $libService = app(\App\Services\LibelulaPaymentService::class);
-                             $result = $libService->createPayment($wallet, $tagTotal, "Carga inicial RFID $code", [
-                                 'emite_factura' => true,
-                                 'internal_usage_tx' => true,
-                                 'transaction_id' => $tx->id,
-                                 'line_items' => $tagLineItems,
-                                 'is_credit' => $isCredit,
-                                 'vehicle_plate' => $inputData['vehicle_plate'] ?? '1111ABC',
-                             ], $isManual, 0);
+                            $result = $libService->createPayment($wallet, $tagTotal, "Carga inicial RFID $code", [
+                                'emite_factura' => true,
+                                'internal_usage_tx' => true,
+                                'transaction_id' => $tx->id,
+                                'line_items' => $tagLineItems,
+                                'is_credit' => $isCredit,
+                                'vehicle_plate' => $inputData['vehicle_plate'] ?? '1111ABC',
+                            ], $isManual, 0);
 
                             if (!$result['success']) {
                                 throw new \Exception("Libélula (Tag $code): " . ($result['detail'] ?? $result['message']));
@@ -369,14 +428,14 @@ class BulkRfidManager extends Page
                 $isManual = ($inputData['payment_method'] ?? 'manual') === 'manual';
                 $isCredit = ($inputData['payment_method'] ?? 'manual') === 'credit';
                 $wallet = Wallet::firstOrCreate(['user_id' => $userId], ['balance' => 0, 'currency' => 'BOB']);
-                
+
                 // One single transaction for the whole batch
                 $masterTx = WalletTransaction::create([
                     'user_id' => $userId,
                     'wallet_id' => $wallet->id,
                     'type' => 'RECHARGE',
                     'amount' => max(0, $totalBatchAmount - $globalDiscount),
-                    'balance_after' => $wallet->balance, 
+                    'balance_after' => $wallet->balance,
                     'currency' => 'BOB',
                     'reference_id' => 'BULK-BATCH-' . now()->timestamp,
                     'status' => 'PENDING',
@@ -394,14 +453,14 @@ class BulkRfidManager extends Page
                 // Emit invoice if checked. For credit, we want to invoice immediately but keep status as credit.
                 if ($inputData['emit_invoice'] ?? false) {
                     $libService = app(\App\Services\LibelulaPaymentService::class);
-                     $result = $libService->createPayment($wallet, $masterTx->amount, $masterTx->description, [
-                         'emite_factura' => true,
-                         'internal_usage_tx' => true,
-                         'transaction_id' => $masterTx->id,
-                         'line_items' => $allLineItems,
-                         'is_credit' => $isCredit,
-                         'vehicle_plate' => $inputData['vehicle_plate'] ?? '1111ABC',
-                     ], $isManual, $globalDiscount);
+                    $result = $libService->createPayment($wallet, $masterTx->amount, $masterTx->description, [
+                        'emite_factura' => true,
+                        'internal_usage_tx' => true,
+                        'transaction_id' => $masterTx->id,
+                        'line_items' => $allLineItems,
+                        'is_credit' => $isCredit,
+                        'vehicle_plate' => $inputData['vehicle_plate'] ?? '1111ABC',
+                    ], $isManual, $globalDiscount);
 
                     if (!$result['success']) {
                         throw new \Exception("Libélula (Lote): " . ($result['detail'] ?? $result['message']));
@@ -421,7 +480,7 @@ class BulkRfidManager extends Page
                     $bodyMessage = "Tarjetas creadas. Enlaces de pago generados en Libélula.";
                 }
             }
-            
+
             Notification::make()
                 ->title('Proceso completado')
                 ->body($bodyMessage)
