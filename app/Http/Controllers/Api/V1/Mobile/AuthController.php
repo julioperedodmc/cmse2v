@@ -14,6 +14,9 @@ use Illuminate\Validation\ValidationException;
 use Spatie\Permission\Models\Role;
 use Illuminate\Support\Facades\Http;
 use App\Models\Product;
+use Firebase\JWT\JWK;
+use Firebase\JWT\JWT;
+use Illuminate\Support\Facades\Cache;
 
 class AuthController extends Controller
 {
@@ -227,6 +230,113 @@ class AuthController extends Controller
                 ]);
 
                 return $u;
+            });
+        }
+
+        $token = $user->createToken('mobile-app')->plainTextToken;
+        $wallet = Wallet::where('user_id', $user->id)->first();
+        $tag = RfidTag::where('user_id', $user->id)->orderByDesc('is_virtual')->first();
+
+        return response()->json([
+            'message' => 'Inicio de sesión exitoso',
+            'user' => $user,
+            'wallet' => $wallet,
+            'rfid_tag' => $tag,
+            'token' => $token,
+        ]);
+    }
+
+    public function appleLogin(Request $request)
+    {
+        $validated = $request->validate([
+            'identity_token' => 'required|string',
+            'raw_nonce' => 'required|string|min:16|max:255',
+            'given_name' => 'nullable|string|max:255',
+            'family_name' => 'nullable|string|max:255',
+        ]);
+
+        try {
+            $keySet = Cache::remember('apple-sign-in-jwks', now()->addHours(12), function () {
+                $response = Http::timeout(10)->get('https://appleid.apple.com/auth/keys');
+                $response->throw();
+
+                return $response->json();
+            });
+
+            $payload = JWT::decode($validated['identity_token'], JWK::parseKeySet($keySet));
+        } catch (\Throwable $exception) {
+            report($exception);
+
+            return response()->json(['message' => 'Token de Apple inválido'], 401);
+        }
+
+        $audience = is_array($payload->aud ?? null) ? $payload->aud : [$payload->aud ?? null];
+        $expectedNonce = hash('sha256', $validated['raw_nonce']);
+
+        if (
+            ($payload->iss ?? null) !== 'https://appleid.apple.com'
+            || !in_array(config('services.apple.client_id'), $audience, true)
+            || !is_string($payload->sub ?? null)
+            || !is_string($payload->email ?? null)
+            || !in_array($payload->email_verified ?? false, [true, 'true'], true)
+            || !hash_equals($expectedNonce, (string) ($payload->nonce ?? ''))
+        ) {
+            return response()->json(['message' => 'Token de Apple inválido'], 401);
+        }
+
+        $appleSub = $payload->sub;
+        $email = strtolower($payload->email);
+        $name = trim(implode(' ', array_filter([
+            $validated['given_name'] ?? null,
+            $validated['family_name'] ?? null,
+        ])));
+
+        $user = User::where('apple_sub', $appleSub)->first();
+
+        if (!$user) {
+            $user = User::where('email', $email)->first();
+        }
+
+        if ($user) {
+            if ($user->apple_sub !== null && $user->apple_sub !== $appleSub) {
+                return response()->json(['message' => 'La cuenta de Apple ya está asociada a otro usuario'], 409);
+            }
+
+            $user->forceFill(['apple_sub' => $appleSub])->save();
+        } else {
+            $user = DB::transaction(function () use ($email, $name, $appleSub) {
+                $user = User::create([
+                    'name' => $name !== '' ? $name : 'Usuario Apple',
+                    'email' => $email,
+                    'apple_sub' => $appleSub,
+                    'password' => Hash::make(Str::random(32)),
+                ]);
+
+                $role = Role::firstOrCreate(['name' => 'client', 'guard_name' => 'web']);
+                $user->assignRole($role);
+
+                Wallet::firstOrCreate(
+                    ['user_id' => $user->id],
+                    ['balance' => 0, 'currency' => 'BOB', 'is_postpaid' => false]
+                );
+
+                $tagCode = 'A' . strtoupper(Str::random(7));
+                while (RfidTag::where('tag_code', $tagCode)->exists()) {
+                    $tagCode = 'A' . strtoupper(Str::random(7));
+                }
+
+                $virtualProduct = Product::where('internal_code', 'VIRTUAL-TAG')->first();
+
+                RfidTag::create([
+                    'tag_code' => $tagCode,
+                    'user_id' => $user->id,
+                    'product_id' => $virtualProduct?->id,
+                    'name' => 'Tag Virtual App',
+                    'is_active' => true,
+                    'is_virtual' => true,
+                ]);
+
+                return $user;
             });
         }
 

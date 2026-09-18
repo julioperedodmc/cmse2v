@@ -10,6 +10,7 @@
         "bezhansalleh/filament-shield": "^3.9",
         "calebporzio/sushi": "^2.5",
         "filament/filament": "^3.2",
+        "firebase/php-jwt": "^7.1",
         "laravel/framework": "^12.0",
         "laravel/reverb": "^1.0",
         "laravel/sanctum": "^4.3",

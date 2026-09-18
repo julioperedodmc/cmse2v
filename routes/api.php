@@ -30,6 +30,7 @@ Route::prefix('v1/mobile')->group(function () {
     Route::post('/register', [AuthController::class, 'register']);
     Route::post('/validate-field', [AuthController::class, 'validateField']);
     Route::post('/google-login', [AuthController::class, 'googleLogin']);
+    Route::post('/apple-login', [AuthController::class, 'appleLogin']);
     Route::post('/password/email', [AuthController::class, 'sendResetPin']);
     Route::post('/password/reset', [AuthController::class, 'resetPassword']);
     Route::get('/config', [App\Http\Controllers\Api\V1\Mobile\SystemController::class, 'config']);

@@ -104,6 +104,7 @@ class User extends Authenticatable implements \Filament\Models\Contracts\Filamen
         'sap_client_code',
         'sap_synced_at',
         'fcm_token',
+        'apple_sub',
     ];
 
     /**
@@ -114,6 +115,7 @@ class User extends Authenticatable implements \Filament\Models\Contracts\Filamen
     protected $hidden = [
         'password',
         'remember_token',
+        'apple_sub',
     ];
 
     /**
