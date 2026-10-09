@@ -74,6 +74,14 @@ class ChargingSessionResource extends Resource
                     ->required()
                     ->numeric()
                     ->default(0.0000),
+                Forms\Components\TextInput::make('session_fee')
+                    ->label('Fee Parqueo')
+                    ->numeric()
+                    ->default(0.00),
+                Forms\Components\TextInput::make('discount_amount')
+                    ->label('Descuento')
+                    ->numeric()
+                    ->default(0.00),
                 Forms\Components\TextInput::make('total_cost')
                     ->required()
                     ->numeric()
@@ -145,6 +153,17 @@ class ChargingSessionResource extends Resource
                     ->suffix(' kWh')
                     ->numeric(2)
                     ->sortable(),
+
+                Tables\Columns\TextColumn::make('session_fee')
+                    ->label('Fee Parqueo')
+                    ->money(fn($record) => $record->currency)
+                    ->toggleable(),
+
+                Tables\Columns\TextColumn::make('discount_amount')
+                    ->label('Descuento')
+                    ->money(fn($record) => $record->currency)
+                    ->color('success')
+                    ->toggleable(),
 
                 // COST vs PRICE
                 Tables\Columns\TextColumn::make('utility_cost')

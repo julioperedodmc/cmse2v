@@ -282,6 +282,15 @@ class BulkRfidManager extends Page
                 }
             }
 
+            $cardProduct = \App\Models\Product::find($cardProductId);
+            $rechargeProduct = \App\Models\Product::find($rechargeProductId);
+
+            $cardProductName = $cardProduct?->name ?? 'TARJETA PREPAGO';
+            $cardSiatCode = $cardProduct?->siat_product_code ?: ($cardProduct?->internal_code ?: '1');
+
+            $rechargeProductName = $rechargeProduct?->name ?? 'RECARGA SALDO TARJETA PREPAGO';
+            $rechargeSiatCode = $rechargeProduct?->siat_product_code ?: ($rechargeProduct?->internal_code ?: '1');
+
             $allLineItems = [];
             $totalBatchAmount = 0;
             $tagCodesList = [];
@@ -340,28 +349,26 @@ class BulkRfidManager extends Page
                 $tagTotal = 0;
 
                 if ($cardPrice > 0 || $cardDiscount > 0) {
-                    $cardSiatCode = \App\Models\Product::find($cardProductId)?->siat_product_code ?? '1';
                     $tagLineItems[] = [
-                        'concepto' => " RFID ($code) monto Bs " . number_format($cardPrice, 2),
+                        'concepto' => "{$cardProductName} ($code)",
                         'cantidad' => (int) 1,
                         'costo_unitario' => $cardPrice,
                         'descuento_unitario' => $cardDiscount,
-                        'detalle' => " Tarjeta Plástica NFC Cod: $code",
-                        'codigo_producto' => $cardSiatCode,
+                        'detalle' => "{$cardProductName} ($code)",
+                        'codigo_producto' => (string) $cardSiatCode,
                         'ignora_factura' => false,
                     ];
                     $tagTotal += max(0, $cardPrice - $cardDiscount);
                 }
 
                 if ($credit > 0) {
-                    $rechargeSiatCode = \App\Models\Product::find($rechargeProductId)?->siat_product_code ?? '1';
                     $tagLineItems[] = [
-                        'concepto' => " ($code) monto Bs " . number_format($credit, 2),
+                        'concepto' => "{$rechargeProductName} ($code)",
                         'cantidad' => (int) 1,
                         'costo_unitario' => $credit,
                         'descuento_unitario' => $rechargeDiscount,
-                        'detalle' => " Recarga inicial tarjeta NFC Cod: $code",
-                        'codigo_producto' => $rechargeSiatCode,
+                        'detalle' => "{$rechargeProductName} ($code)",
+                        'codigo_producto' => (string) $rechargeSiatCode,
                         'ignora_factura' => false,
                     ];
                     $tagTotal += max(0, $credit - $rechargeDiscount);

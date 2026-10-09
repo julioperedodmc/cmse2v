@@ -59,6 +59,15 @@
                     <td class="px-4 py-2 text-right">{{ number_format($record->time_fee, 2) }}</td>
                 </tr>
             @endif
+
+            @if(($record->discount_amount ?? 0) > 0)
+                <tr class="border-b dark:border-gray-700 text-green-600 font-medium">
+                    <td class="px-4 py-2">Descuento aplicado</td>
+                    <td class="px-4 py-2 text-right">1</td>
+                    <td class="px-4 py-2 text-right">-</td>
+                    <td class="px-4 py-2 text-right">-{{ number_format($record->discount_amount, 2) }}</td>
+                </tr>
+            @endif
         </tbody>
         <tfoot>
             <tr class="font-bold text-lg">

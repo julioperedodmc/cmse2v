@@ -94,6 +94,14 @@ class ClientResource extends Resource
                         Infolists\Components\TextEntry::make('email')->label('Email'),
                         Infolists\Components\TextEntry::make('phone')->label('Teléfono'),
                         Infolists\Components\TextEntry::make('created_at')->label('Fecha Registro')->dateTime(),
+                        Infolists\Components\TextEntry::make('active_sessions')
+                            ->label('Sesiones Móviles')
+                            ->state(function (\App\Models\User $record) {
+                                $count = $record->tokens()->count();
+                                return $count > 0 ? "{$count} dispositivo(s) conectado(s)" : 'Sin sesiones activas';
+                            })
+                            ->badge()
+                            ->color(fn ($state) => str_contains((string) $state, 'dispositivo') ? 'success' : 'gray'),
                     ])->columns(2),
                 
                 Infolists\Components\Section::make('Empresa y Facturación')
@@ -229,11 +237,53 @@ class ClientResource extends Resource
                             ->success()
                             ->send();
                     }),
+                Tables\Actions\Action::make('revoke_sessions')
+                    ->label('Cerrar Sesión App')
+                    ->icon('heroicon-o-arrow-left-on-rectangle')
+                    ->color('warning')
+                    ->tooltip('Cierra las sesiones activas en la app móvil revocando los tokens')
+                    ->requiresConfirmation()
+                    ->modalHeading(fn (\App\Models\User $record) => "Cerrar sesión de {$record->name}")
+                    ->modalDescription('¿Estás seguro de que deseas cerrar todas las sesiones activas de este usuario en la app móvil? Esto invalidará sus tokens de acceso y la app le solicitará iniciar sesión nuevamente.')
+                    ->modalSubmitActionLabel('Sí, cerrar sesión')
+                    ->action(function (\App\Models\User $record) {
+                        $count = $record->tokens()->count();
+                        $record->tokens()->delete();
+                        $record->update(['fcm_token' => null]);
+
+                        \Filament\Notifications\Notification::make()
+                            ->title('Sesión cerrada')
+                            ->body("Se revocaron las sesiones de {$record->name} ({$count} token(s) eliminados).")
+                            ->success()
+                            ->send();
+                    }),
                 Tables\Actions\EditAction::make(),
                 Tables\Actions\DeleteAction::make(),
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
+                    Tables\Actions\BulkAction::make('revoke_sessions_bulk')
+                        ->label('Cerrar Sesiones App')
+                        ->icon('heroicon-o-arrow-left-on-rectangle')
+                        ->color('warning')
+                        ->requiresConfirmation()
+                        ->modalHeading('Cerrar sesiones en lote')
+                        ->modalDescription('Esto cerrará las sesiones activas de todos los usuarios seleccionados en la app móvil.')
+                        ->modalSubmitActionLabel('Sí, cerrar sesiones')
+                        ->action(function (\Illuminate\Database\Eloquent\Collection $records) {
+                            $totalRevoked = 0;
+                            foreach ($records as $record) {
+                                $totalRevoked += $record->tokens()->count();
+                                $record->tokens()->delete();
+                                $record->update(['fcm_token' => null]);
+                            }
+
+                            \Filament\Notifications\Notification::make()
+                                ->title('Sesiones cerradas')
+                                ->body("Se cerraron las sesiones de {$records->count()} usuario(s) ({$totalRevoked} tokens eliminados).")
+                                ->success()
+                                ->send();
+                        }),
                     Tables\Actions\DeleteBulkAction::make(),
                     \pxlrbt\FilamentExcel\Actions\Tables\ExportBulkAction::make(),
                 ]),

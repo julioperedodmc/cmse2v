@@ -167,6 +167,25 @@ class UserResource extends Resource
             ])
             ->actions([
                 Tables\Actions\ViewAction::make(),
+                Tables\Actions\Action::make('revoke_sessions')
+                    ->label('Cerrar Sesión')
+                    ->icon('heroicon-o-arrow-left-on-rectangle')
+                    ->color('warning')
+                    ->requiresConfirmation()
+                    ->modalHeading(fn (\App\Models\User $record) => "Cerrar sesiones de {$record->name}")
+                    ->modalDescription('¿Estás seguro de que deseas revocar todas las sesiones activas de este usuario?')
+                    ->modalSubmitActionLabel('Sí, cerrar sesiones')
+                    ->action(function (\App\Models\User $record) {
+                        $count = $record->tokens()->count();
+                        $record->tokens()->delete();
+                        $record->update(['fcm_token' => null]);
+
+                        \Filament\Notifications\Notification::make()
+                            ->title('Sesiones revocadas')
+                            ->body("Se revocaron las sesiones de {$record->name} ({$count} token(s) eliminados).")
+                            ->success()
+                            ->send();
+                    }),
                 Tables\Actions\EditAction::make(),
                 Tables\Actions\DeleteAction::make(),
             ])

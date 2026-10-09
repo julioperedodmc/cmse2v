@@ -128,3 +128,9 @@ Route::prefix('v1/sap')->middleware('auth:sanctum')->group(function () {
     Route::get('/export', [SapExportController::class, 'exportData']);
     Route::post('/sync', [SapExportController::class, 'markSynced']);
 });
+
+// --- EXTERNAL APPS CLIENT API (V1) ---
+Route::prefix('v1/external')->middleware([\App\Http\Middleware\VerifyExternalApiKey::class])->group(function () {
+    Route::get('/clients', [\App\Http\Controllers\Api\V1\ExternalClientController::class, 'index']);
+});
+
