@@ -17,6 +17,7 @@ use App\Models\Product;
 use Firebase\JWT\JWK;
 use Firebase\JWT\JWT;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class AuthController extends Controller
 {
@@ -263,9 +264,11 @@ class AuthController extends Controller
                 return $response->json();
             });
 
-            $payload = JWT::decode($validated['identity_token'], JWK::parseKeySet($keySet));
+            JWT::$leeway = 60;
+            $payload = JWT::decode($validated['identity_token'], JWK::parseKeySet($keySet, 'RS256'));
         } catch (\Throwable $exception) {
-            report($exception);
+            Cache::forget('apple-sign-in-jwks');
+            Log::warning('Apple login: JWT decode failed', ['error' => get_class($exception) . ': ' . $exception->getMessage()]);
 
             return response()->json(['message' => 'Token de Apple inválido'], 401);
         }
@@ -273,14 +276,22 @@ class AuthController extends Controller
         $audience = is_array($payload->aud ?? null) ? $payload->aud : [$payload->aud ?? null];
         $expectedNonce = hash('sha256', $validated['raw_nonce']);
 
-        if (
-            ($payload->iss ?? null) !== 'https://appleid.apple.com'
-            || !in_array(config('services.apple.client_id'), $audience, true)
-            || !is_string($payload->sub ?? null)
-            || !is_string($payload->email ?? null)
-            || !in_array($payload->email_verified ?? false, [true, 'true'], true)
-            || !hash_equals($expectedNonce, (string) ($payload->nonce ?? ''))
-        ) {
+        $failures = array_keys(array_filter([
+            'iss' => ($payload->iss ?? null) !== 'https://appleid.apple.com',
+            'aud' => !in_array(config('services.apple.client_id'), $audience, true),
+            'sub' => !is_string($payload->sub ?? null),
+            'email' => !is_string($payload->email ?? null),
+            'email_verified' => !in_array($payload->email_verified ?? false, [true, 'true'], true),
+            'nonce' => !hash_equals($expectedNonce, (string) ($payload->nonce ?? '')),
+        ]));
+
+        if ($failures !== []) {
+            Log::warning('Apple login: claim validation failed', [
+                'failed' => $failures,
+                'aud' => $audience,
+                'expected_aud' => config('services.apple.client_id'),
+            ]);
+
             return response()->json(['message' => 'Token de Apple inválido'], 401);
         }
 
