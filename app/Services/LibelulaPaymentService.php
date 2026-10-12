@@ -81,6 +81,12 @@ class LibelulaPaymentService
             }
         }
 
+        // The webhook and status checks look the debt up in Libélula by this identificador,
+        // which can differ from the transaction's own reference for internal-usage transactions.
+        if ($txId && Schema::hasColumn('wallet_transactions', 'libelula_identifier')) {
+            DB::table('wallet_transactions')->where('id', $txId)->update(['libelula_identifier' => $localReference]);
+        }
+
         $invoicingPolicy = \App\Models\SystemSetting::get()->invoicing_policy ?: 'recharge';
         $canInvoice = ($invoicingPolicy === 'recharge' || ($invoiceData['emite_factura'] ?? false) === true);
 
@@ -317,7 +323,7 @@ class LibelulaPaymentService
             return false;
 
         $refCol = Schema::hasColumn('wallet_transactions', 'reference_id') ? 'reference_id' : 'reference';
-        $localReference = $tx->{$refCol};
+        $localReference = ($tx->libelula_identifier ?? null) ?: $tx->{$refCol};
 
         try {
             Log::info("Libelula: Verifying status for TX {$txId}", ['ref' => $localReference]);
@@ -354,69 +360,51 @@ class LibelulaPaymentService
         return false;
     }
 
+    /**
+     * The webhook is unauthenticated, so its payload is only used to locate the transaction.
+     * Whether it was paid is always confirmed with Libélula via verifyStatus().
+     */
     public function handleWebhook(array $data): void
     {
-        $candidateIds = array_filter([
-            $data['identificador'] ?? null,
-            $data['transaction_id'] ?? null,
-            $data['id_transaccion'] ?? null,
-            $data['referencia'] ?? null,
-            $data['numeroReferencia'] ?? null,
-        ]);
-
-        $tx = null;
-        $refCol = Schema::hasColumn('wallet_transactions', 'reference_id') ? 'reference_id' : 'reference';
-
-        foreach ($candidateIds as $cid) {
-            if (empty($cid))
-                continue;
-
-            $tx = DB::table('wallet_transactions')->where($refCol, (string) $cid)->first();
-            if ($tx)
-                break;
-
-            if (is_string($cid) && str_contains($cid, '-')) {
-                $tx = DB::table('wallet_transactions')->where($refCol, $cid)->first();
-                if ($tx)
-                    break;
-
-                $parts = explode('-', $cid);
-                foreach ($parts as $p) {
-                    if (is_numeric($p)) {
-                        $tx = DB::table('wallet_transactions')->where($refCol, (string) $p)->first();
-                        if ($tx)
-                            break 2;
-
-                        $tx = DB::table('wallet_transactions')->where('id', (int) $p)->first();
-                        if ($tx)
-                            break 2;
-                    }
-                }
-            }
-
-            if (is_numeric($cid)) {
-                $tx = DB::table('wallet_transactions')->where('id', (int) $cid)->first();
-                if ($tx)
-                    break;
-            }
-        }
+        $tx = $this->findWebhookTransaction($data);
 
         if (!$tx) {
             Log::warning('Libelula webhook transaction not found', ['payload' => $data]);
             return;
         }
 
-        $status = strtoupper((string) ($data['status'] ?? $data['estado'] ?? ''));
-        $paid = in_array($status, ['PAID', 'PAGADO', 'COMPLETED', 'SUCCESS'], true) || (int) ($data['error'] ?? 0) === 0;
-
-        if ($paid) {
-            $verified = $this->verifyStatus((int) $tx->id);
-            if (!$verified) {
-                $this->markCompleted((int) $tx->id, $data);
-            }
-        } else {
-            $this->markFailed((int) $tx->id, $data);
+        if (!$this->verifyStatus((int) $tx->id)) {
+            Log::warning("Libelula webhook: TX {$tx->id} not confirmed as paid by Libelula", ['payload' => $data]);
         }
+    }
+
+    private function findWebhookTransaction(array $data): ?object
+    {
+        $refCol = Schema::hasColumn('wallet_transactions', 'reference_id') ? 'reference_id' : 'reference';
+        $hasIdentifierCol = Schema::hasColumn('wallet_transactions', 'libelula_identifier');
+
+        $identifier = $data['identificador'] ?? null;
+        if (is_scalar($identifier) && (string) $identifier !== '') {
+            $tx = DB::table('wallet_transactions')
+                ->where(function ($query) use ($identifier, $refCol, $hasIdentifierCol) {
+                    $query->where($refCol, (string) $identifier);
+                    if ($hasIdentifierCol) {
+                        $query->orWhere('libelula_identifier', (string) $identifier);
+                    }
+                })
+                ->first();
+
+            if ($tx) {
+                return $tx;
+            }
+        }
+
+        $externalId = $data['id_transaccion'] ?? $data['transaction_id'] ?? null;
+        if (is_scalar($externalId) && (string) $externalId !== '' && Schema::hasColumn('wallet_transactions', 'external_payment_id')) {
+            return DB::table('wallet_transactions')->where('external_payment_id', (string) $externalId)->first();
+        }
+
+        return null;
     }
 
     private function markCompleted(int $txId, array $payload): void
