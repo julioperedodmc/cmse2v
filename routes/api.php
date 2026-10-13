@@ -11,6 +11,12 @@ use App\Http\Controllers\Api\V1\Mobile\LocationController;
 use App\Http\Controllers\Api\V1\Mobile\VehicleController;
 use App\Http\Controllers\Api\V1\Mobile\DashboardReportController;
 use App\Http\Controllers\Api\V1\Mobile\ExecutiveReportController;
+use App\Http\Controllers\Api\V1\Mobile\Reports\AetnBillingReportController;
+use App\Http\Controllers\Api\V1\Mobile\Reports\ClientBalancesReportController;
+use App\Http\Controllers\Api\V1\Mobile\Reports\ExecutiveSummaryReportController;
+use App\Http\Controllers\Api\V1\Mobile\Reports\OperationsReportController;
+use App\Http\Controllers\Api\V1\Mobile\Reports\RfidDealershipsReportController;
+use App\Http\Controllers\Api\V1\Mobile\Reports\VehicleReportController;
 use App\Http\Controllers\Api\V1\Sap\SapExportController;
 
 /*
@@ -39,14 +45,14 @@ Route::prefix('v1/mobile')->group(function () {
 
     // Executive & Operational Reports API Suite
     Route::prefix('reports')->group(function () {
-        Route::get('/filter-options', [ExecutiveReportController::class, 'getFilterOptions']);
+        Route::get('/filter-options', [ExecutiveSummaryReportController::class, 'getFilterOptions']);
         Route::get('/dashboard-summary', [DashboardReportController::class, 'getSummary']);
-        Route::get('/executive-summary', [ExecutiveReportController::class, 'getExecutiveSummary']);
-        Route::get('/aetn-billing', [ExecutiveReportController::class, 'getAetnBilling']);
-        Route::get('/operations', [ExecutiveReportController::class, 'getOperations']);
-        Route::get('/client-balances', [ExecutiveReportController::class, 'getClientBalances']);
-        Route::get('/rfid-dealerships', [ExecutiveReportController::class, 'getRfidDealerships']);
-        Route::get('/vehicles', [ExecutiveReportController::class, 'getVehicleReports']);
+        Route::get('/executive-summary', [ExecutiveSummaryReportController::class, 'getExecutiveSummary']);
+        Route::get('/aetn-billing', [AetnBillingReportController::class, 'getAetnBilling']);
+        Route::get('/operations', [OperationsReportController::class, 'getOperations']);
+        Route::get('/client-balances', [ClientBalancesReportController::class, 'getClientBalances']);
+        Route::get('/rfid-dealerships', [RfidDealershipsReportController::class, 'getRfidDealerships']);
+        Route::get('/vehicles', [VehicleReportController::class, 'getVehicleReports']);
     });
 
     // Public Webhooks
