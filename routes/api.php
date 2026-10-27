@@ -133,6 +133,12 @@ Route::prefix('v1/mobile')->group(function () {
 Route::prefix('v1/sap')->middleware('auth:sanctum')->group(function () {
     Route::get('/export', [SapExportController::class, 'exportData']);
     Route::post('/sync', [SapExportController::class, 'markSynced']);
+
+    // Reports aliases for SAP / External systems
+    Route::prefix('reports')->group(function () {
+        Route::get('/aetn-billing', [AetnBillingReportController::class, 'getAetnBilling']);
+        Route::get('/operations', [OperationsReportController::class, 'getOperations']);
+    });
 });
 
 // --- EXTERNAL APPS CLIENT API (V1) ---

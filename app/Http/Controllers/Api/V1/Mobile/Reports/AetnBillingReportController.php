@@ -243,15 +243,21 @@ class AetnBillingReportController extends Controller
                     'alto' => $altoTime,
                 ];
 
+                $totalKwhBajoRounded = round($totalKwhBajo, 1);
+                $totalKwhMedioRounded = round($totalKwhMedio, 1);
+                $totalKwhAltoRounded = round($totalKwhAlto, 1);
+                $grandTotalKwhRounded = round($totalKwhBajoRounded + $totalKwhMedioRounded + $totalKwhAltoRounded, 1);
+
                 return [
                     'success' => true,
-                    'has_data' => count($resultMonthly) > 0 && $grandTotalKwh > 0,
+                    'has_data' => count($resultMonthly) > 0 && $grandTotalKwhRounded > 0,
                     'rates_applied' => $latestRates,
                     'summary_totals' => [
-                        'total_kwh_bajo' => round($totalKwhBajo, 1),
-                        'total_kwh_medio' => round($totalKwhMedio, 1),
-                        'total_kwh_alto' => round($totalKwhAlto, 1),
-                        'grand_total_kwh' => round($grandTotalKwh, 1),
+                        'total_sessions' => $sessions->count(),
+                        'grand_total_kwh' => $grandTotalKwhRounded,
+                        'total_kwh_alto' => $totalKwhAltoRounded,
+                        'total_kwh_medio' => $totalKwhMedioRounded,
+                        'total_kwh_bajo' => $totalKwhBajoRounded,
                         'grand_total_gross_revenue_bob' => round($totalGrossRevenue, 2),
                     ],
                     'monthly_details' => $resultMonthly,
