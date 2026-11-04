@@ -84,15 +84,26 @@ class BillingService
             }
         }
 
-        // Use the session fee from the session model if it's already been determined (skipped or charged)
-        // Otherwise fallback to the tariff price
-        $sessionFee = isset($session->session_fee) ? (float) $session->session_fee : (float) ($tariff->price_session ?? 0);
-
-        // Fee Waiver Logic (v3.1)
-        $settings = SystemSetting::get();
-        if (($settings->waive_parking_fee_for_cards ?? false) && $session->rfidTag && !$session->rfidTag->is_virtual) {
-            $sessionFee = 0;
+        // Fee & Discount Logic based on granular Tariff controls
+        $tag = $session->rfidTag;
+        if (!$tag && $session->rfid_tag_id) {
+            $tag = \App\Models\RfidTag::find($session->rfid_tag_id);
         }
+
+        $user = $session->user;
+        if (!$user && $session->user_id) {
+            $user = \App\Models\User::find($session->user_id);
+        }
+
+        $isMobileApp = $tag && $tag->is_virtual;
+        $isPhysicalCard = !$tag || ($tag && !$tag->is_virtual);
+
+        $isDealership = $isPhysicalCard && (
+            ($tag && !empty($tag->company_id)) ||
+            ($user && !empty($user->company_id)) ||
+            ($tag && $tag->user && !empty($tag->user->company_id))
+        );
+        $isRegularCard = $isPhysicalCard && !$isDealership;
 
         // Minimum billing logic (User said "puede ser 1 sin problema")
         // We apply the minimum to the total energy cost if it's below the rate of 1kWh
@@ -112,35 +123,43 @@ class BillingService
             $timeFee = max(0, $durationMin - $freeMin) * $priceMin;
         }
 
-        // Fee & Discount Logic based on granular Tariff controls
-        // Ensure the tag relationship is loaded to correctly identify modality (App vs Card)
-        $tag = $session->rfidTag;
-        if (!$tag && $session->rfid_tag_id) {
-            $tag = \App\Models\RfidTag::find($session->rfid_tag_id);
+        // Determine if Fee applies
+        if ($isMobileApp) {
+            $feeEnabledForModality = (bool) ($tariff->apply_fee_to_app ?? true);
+        } elseif ($isDealership) {
+            $feeEnabledForModality = (bool) ($tariff->apply_fee_to_dealership_cards ?? true);
+        } else {
+            $feeEnabledForModality = (bool) ($tariff->apply_fee_to_cards ?? false);
         }
 
-        $isPhysicalCard = !$tag || ($tag && !$tag->is_virtual);
-        $isMobileApp = $tag && $tag->is_virtual;
+        $shouldApplyFee = ($tariff->is_parking_fee_enabled ?? true) && $feeEnabledForModality;
 
-        // Determine if Fee applies
-        $shouldApplyFee = ($tariff->is_parking_fee_enabled ?? true) && (
-            ($isPhysicalCard && ($tariff->apply_fee_to_cards ?? false)) ||
-            ($isMobileApp && ($tariff->apply_fee_to_app ?? true))
-        );
+        // Fee Waiver Logic (v3.1)
+        $settings = SystemSetting::get();
+        if ($isDealership && ($settings->waive_parking_fee_for_dealerships ?? false)) {
+            $shouldApplyFee = false;
+        } elseif ($isRegularCard && ($settings->waive_parking_fee_for_cards ?? false)) {
+            $shouldApplyFee = false;
+        }
 
-        if (!$shouldApplyFee) {
+        if ($shouldApplyFee) {
+            $sessionFee = (float) ($session->session_fee > 0 ? $session->session_fee : ($tariff->price_session ?? 0));
+        } else {
             $sessionFee = 0;
         }
 
         // Determine if Discount applies
-        // NEW RULE: Discount applies ONLY if the Parking Fee is enabled for this modality
-        $shouldApplyDiscount = $shouldApplyFee && ($tariff->discount_fixed_amount ?? 0) > 0 && (
-            ($isPhysicalCard && ($tariff->apply_discount_to_cards ?? false)) ||
-            ($isMobileApp && ($tariff->apply_discount_to_app ?? true))
-        );
+        if ($isMobileApp) {
+            $discountEnabledForModality = (bool) ($tariff->apply_discount_to_app ?? true);
+        } elseif ($isDealership) {
+            $discountEnabledForModality = (bool) ($tariff->apply_discount_to_dealership_cards ?? false);
+        } else {
+            $discountEnabledForModality = (bool) ($tariff->apply_discount_to_cards ?? false);
+        }
+
+        $shouldApplyDiscount = $shouldApplyFee && ($tariff->discount_fixed_amount ?? 0) > 0 && $discountEnabledForModality;
 
         $discountAmount = $shouldApplyDiscount ? (float) $tariff->discount_fixed_amount : 0;
-
         $actualDiscount = $shouldApplyDiscount ? min($discountAmount, $sessionFee) : 0;
         $subtotal = round($sessionFee + $totalEnergyCost + $timeFee, 2);
         $total = round($subtotal - $actualDiscount, 2);
@@ -152,7 +171,7 @@ class BillingService
             'session_fee' => round($sessionFee, 2),
             'time_fee' => round($timeFee, 2),
             'energy_cost' => round($totalEnergyCost, 2),
-            'currency' => $tariff->currency ?? 'USD',
+            'currency' => $tariff->currency ?? 'BOB',
             'utility_cost' => round($totalUtilityCost, 2),
             'margin' => round($total - $totalUtilityCost, 2),
             'breakdown' => $breakdown,
@@ -188,18 +207,49 @@ class BillingService
 
             $tariff = $session->tariff ?: Tariff::first();
 
-            // Check granular fee toggle for cards vs app
-            $isPhysicalCard = !$session->rfidTag || ($session->rfidTag && !$session->rfidTag->is_virtual);
-            $isMobileApp = $session->rfidTag && $session->rfidTag->is_virtual;
-            $shouldApplyFee = ($tariff->is_parking_fee_enabled ?? true) && (
-                ($isPhysicalCard && ($tariff->apply_fee_to_cards ?? false)) ||
-                ($isMobileApp && ($tariff->apply_fee_to_app ?? true))
+            // Check granular fee toggle for cards vs app vs dealership
+            $tag = $session->rfidTag;
+            if (!$tag && $session->rfid_tag_id) {
+                $tag = \App\Models\RfidTag::find($session->rfid_tag_id);
+            }
+
+            $user = $session->user;
+            if (!$user && $session->user_id) {
+                $user = \App\Models\User::find($session->user_id);
+            }
+
+            $isMobileApp = $tag && $tag->is_virtual;
+            $isPhysicalCard = !$tag || ($tag && !$tag->is_virtual);
+
+            $isDealership = $isPhysicalCard && (
+                ($tag && !empty($tag->company_id)) ||
+                ($user && !empty($user->company_id)) ||
+                ($tag && $tag->user && !empty($tag->user->company_id))
             );
+            $isRegularCard = $isPhysicalCard && !$isDealership;
+
+            if ($isMobileApp) {
+                $feeEnabledForModality = (bool) ($tariff->apply_fee_to_app ?? true);
+            } elseif ($isDealership) {
+                $feeEnabledForModality = (bool) ($tariff->apply_fee_to_dealership_cards ?? true);
+            } else {
+                $feeEnabledForModality = (bool) ($tariff->apply_fee_to_cards ?? false);
+            }
+
+            $shouldApplyFee = ($tariff->is_parking_fee_enabled ?? true) && $feeEnabledForModality;
+
+            $settings = SystemSetting::get();
+            if ($isDealership && ($settings->waive_parking_fee_for_dealerships ?? false)) {
+                $shouldApplyFee = false;
+            } elseif ($isRegularCard && ($settings->waive_parking_fee_for_cards ?? false)) {
+                $shouldApplyFee = false;
+            }
 
             if (!$shouldApplyFee) {
                 $session->update([
                     'debited_amount' => 0.0001,
-                    'session_fee' => 0
+                    'session_fee' => 0,
+                    'currency' => $tariff->currency ?? 'BOB',
                 ]);
                 return true;
             }
@@ -225,6 +275,7 @@ class BillingService
 
             // Debit the session fee now
             if ($sessionFee > 0) {
+                $session->session_fee = $sessionFee;
                 // Calculate net initial fee (Fee - Discount)
                 $initialPricing = $this->calculateSessionCost($session, 0);
                 $initialNetDebit = (float) $initialPricing['total'];
@@ -268,6 +319,7 @@ class BillingService
                     $session->debited_amount = $initialNetDebit;
                     $session->session_fee = $sessionFee;
                     $session->discount_amount = $initialPricing['discount_amount'];
+                    $session->currency = $currentPrices['currency'] ?? $tariff->currency ?? 'BOB';
                     $session->applied_tariff_snapshot = $initialPricing['breakdown'] ? array_merge((array) $tariff->toArray(), ['billing_breakdown' => $initialPricing['breakdown']]) : $tariff->toArray();
                     $session->save();
 
@@ -278,6 +330,7 @@ class BillingService
                 // If fee is 0, mark as processed anyway
                 $session->debited_amount = 0.0001;
                 $session->session_fee = 0;
+                $session->currency = $tariff->currency ?? 'BOB';
                 $session->save();
             }
 
@@ -293,10 +346,14 @@ class BillingService
         $tag = $session->rfidTag;
         $user = $session->user;
 
-        // 1. Manual RFID Card Skip
+        $isDealership = ($tag && !empty($tag->company_id)) ||
+            ($user && !empty($user->company_id)) ||
+            ($tag && $tag->user && !empty($tag->user->company_id));
+
+        // 1. Manual RFID Card Skip (Only for non-dealership cards)
         // We assume tags with specific products or physical tags without an assigned user are "manual"
         // Based on user request: "cuando el cobro se haga de una tarjeta rfid manual"
-        if ($tag && !$tag->is_virtual) {
+        if (!$isDealership && $tag && !$tag->is_virtual) {
             // Check if the tag's product internal code is 'MANUAL-TAG' or similar
             // Or if the user explicitly wants ALL physical tags to be free of parking fee?
             // "cuando el cobro se haga de una tarjeta rfid manual igual no se le debe cobrar fee de parqueo solo el consumo"
@@ -306,22 +363,33 @@ class BillingService
         }
 
         // 2. Grace Period
-        // Check if there was a recently completed session for this user/tag
+        // Only skip if there was a recent session in the grace period that actually charged/processed a session fee
+        // (i.e. not Failed, not Starting, and had session_fee > 0 or debited_amount > 0)
         $settings = SystemSetting::get();
         $graceMinutes = (int) ($settings->billing_grace_period ?? 3);
 
-        $recentSession = ChargingSession::where('id', '!=', $session->id)
-            ->where(function ($q) use ($session) {
-                $q->where('user_id', $session->user_id)
-                    ->orWhere('rfid_tag_id', $session->rfid_tag_id);
-            })
-            ->whereNotNull('stop_time')
-            ->where('stop_time', '>=', now()->subMinutes($graceMinutes))
-            ->exists();
+        if ($graceMinutes > 0) {
+            $recentSession = ChargingSession::where('id', '!=', $session->id)
+                ->where(function ($q) use ($session) {
+                    $q->where('user_id', $session->user_id)
+                        ->orWhere('rfid_tag_id', $session->rfid_tag_id);
+                })
+                ->whereNotIn('status', ['Failed', 'Starting'])
+                ->where(function ($q) {
+                    $q->where('session_fee', '>', 0)
+                        ->orWhere('debited_amount', '>', 0);
+                })
+                ->whereNotNull('stop_time')
+                ->where('stop_time', '>=', now()->subMinutes($graceMinutes))
+                ->exists();
 
-        if ($recentSession) {
-            Log::info("Skipping session fee due to grace period", ['session_id' => $session->id, 'user_id' => $session->user_id]);
-            return true;
+            if ($recentSession) {
+                Log::info("Skipping session fee due to grace period (previous session had fee charged)", [
+                    'session_id' => $session->id,
+                    'user_id' => $session->user_id
+                ]);
+                return true;
+            }
         }
 
         return false;
@@ -484,6 +552,7 @@ class BillingService
                 'energy_cost' => $pricing['energy_cost'],
                 'utility_cost' => $pricing['utility_cost'],
                 'margin' => $pricing['margin'],
+                'currency' => $pricing['currency'] ?? $tariff->currency ?? 'BOB',
             ]);
 
             // Force balance refresh
@@ -614,6 +683,7 @@ class BillingService
             'energy_cost' => $pricing['energy_cost'],
             'utility_cost' => $pricing['utility_cost'],
             'margin' => $pricing['margin'],
+            'currency' => $pricing['currency'] ?? $tariff->currency ?? 'BOB',
             'applied_tariff_snapshot' => array_merge(
                 (array) $session->applied_tariff_snapshot,
                 [

@@ -161,6 +161,7 @@ class MonitorActiveTransactions extends Command
                     'stop_time' => $stopTimestamp,
                     'meter_start' => $startWh,
                     'meter_stop' => $currentWh,
+                    'currency' => $tariff?->currency ?: ($tag?->currency ?: ($existingSession?->currency ?: 'BOB')),
                     'status' => $isCompleted ? 'Completed' : 'Active',
                 ]
             );

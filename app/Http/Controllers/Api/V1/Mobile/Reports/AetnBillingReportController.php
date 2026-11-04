@@ -63,7 +63,7 @@ class AetnBillingReportController extends Controller
 
                 // Fetching all completed sessions matching filters. To optimize performance, we select only necessary fields.
                 $sessions = $query->with('station')
-                    ->select('id', 'start_time', 'stop_time', 'total_energy_kwh', 'applied_tariff_snapshot', 'tariff_id', 'station_id')
+                    ->select('id', 'start_time', 'stop_time', 'total_energy_kwh', 'session_fee', 'discount_amount', 'time_fee', 'total_cost', 'applied_tariff_snapshot', 'tariff_id', 'station_id')
                     ->get();
 
                 $billingService = new BillingService();
@@ -80,8 +80,45 @@ class AetnBillingReportController extends Controller
                             'kwh_medio' => 0.0,
                             'kwh_alto' => 0.0,
                             'total_kwh' => 0.0,
+                            'parking_fee_gross' => 0.0,
+                            'parking_fee_discount' => 0.0,
+                            'parking_fee_net' => 0.0,
+                            'sessions_count' => 0,
+                            'sessions_with_parking_fee' => 0,
                             'tariffs' => [],
                         ];
+                    }
+
+                    // Retrieve parking fee and discount (handle bonifications/promotions)
+                    $rawFee = (float) ($session->session_fee ?? 0);
+                    $discount = (float) ($session->discount_amount ?? 0);
+
+                    if ($session->applied_tariff_snapshot) {
+                        $snapshot = is_array($session->applied_tariff_snapshot)
+                            ? $session->applied_tariff_snapshot
+                            : json_decode($session->applied_tariff_snapshot, true);
+
+                        if ($rawFee <= 0) {
+                            if (!empty($snapshot['session_fee'])) {
+                                $rawFee = (float) $snapshot['session_fee'];
+                            } elseif (!empty($snapshot['parking_fee'])) {
+                                $rawFee = (float) $snapshot['parking_fee'];
+                            }
+                        }
+                        if ($discount <= 0 && !empty($snapshot['discount_amount'])) {
+                            $discount = (float) $snapshot['discount_amount'];
+                        }
+                    }
+
+                    $feeDiscount = min($discount, $rawFee);
+                    $netFee = max(0.0, $rawFee - $feeDiscount);
+
+                    $monthlyData[$month]['parking_fee_gross'] += $rawFee;
+                    $monthlyData[$month]['parking_fee_discount'] += $feeDiscount;
+                    $monthlyData[$month]['parking_fee_net'] += $netFee;
+                    $monthlyData[$month]['sessions_count'] += 1;
+                    if ($netFee > 0) {
+                        $monthlyData[$month]['sessions_with_parking_fee'] += 1;
                     }
 
                     // Retrieve breakdown
@@ -153,7 +190,12 @@ class AetnBillingReportController extends Controller
                 $totalKwhMedio = 0;
                 $totalKwhAlto = 0;
                 $grandTotalKwh = 0;
-                $totalGrossRevenue = 0;
+                $totalEnergyRevenue = 0;
+                $totalParkingFeeGross = 0;
+                $totalParkingFeeDiscount = 0;
+                $totalParkingFeeNet = 0;
+                $totalBilledOverall = 0;
+                $totalSessionsWithFee = 0;
                 $latestRates = ['bajo' => $reqBajo, 'medio' => $reqMedio, 'alto' => $reqAlto];
 
                 foreach ($monthlyData as $month => $data) {
@@ -161,6 +203,11 @@ class AetnBillingReportController extends Controller
                     $kMedio = round($data['kwh_medio'], 1);
                     $kAlto = round($data['kwh_alto'], 1);
                     $kTotal = round($data['total_kwh'], 1);
+                    $mFeeGross = round($data['parking_fee_gross'], 2);
+                    $mFeeDiscount = round($data['parking_fee_discount'], 2);
+                    $mFeeNet = round($data['parking_fee_net'], 2);
+                    $mSessionsCount = (int) ($data['sessions_count'] ?? 0);
+                    $mSessionsWithFee = (int) ($data['sessions_with_parking_fee'] ?? 0);
 
                     if ($hasCustomRates) {
                         $mBajo = $reqBajo;
@@ -191,13 +238,19 @@ class AetnBillingReportController extends Controller
                     $rBajo = round($kBajo * $mBajo, 2);
                     $rMedio = round($kMedio * $mMedio, 2);
                     $rAlto = round($kAlto * $mAlto, 2);
-                    $rTotal = round($rBajo + $rMedio + $rAlto, 2);
+                    $rEnergyTotal = round($rBajo + $rMedio + $rAlto, 2);
+                    $rMonthTotalOverall = round($rEnergyTotal + $mFeeNet, 2);
 
                     $totalKwhBajo += $kBajo;
                     $totalKwhMedio += $kMedio;
                     $totalKwhAlto += $kAlto;
                     $grandTotalKwh += $kTotal;
-                    $totalGrossRevenue += $rTotal;
+                    $totalEnergyRevenue += $rEnergyTotal;
+                    $totalParkingFeeGross += $mFeeGross;
+                    $totalParkingFeeDiscount += $mFeeDiscount;
+                    $totalParkingFeeNet += $mFeeNet;
+                    $totalBilledOverall += $rMonthTotalOverall;
+                    $totalSessionsWithFee += $mSessionsWithFee;
 
                     $resultMonthly[] = [
                         'month' => $month,
@@ -205,7 +258,15 @@ class AetnBillingReportController extends Controller
                         'bloque_medio' => ['kwh' => $kMedio, 'rate_aetn' => $mMedio, 'gross_revenue' => $rMedio],
                         'bloque_alto' => ['kwh' => $kAlto, 'rate_aetn' => $mAlto, 'gross_revenue' => $rAlto],
                         'total_kwh' => $kTotal,
-                        'total_gross_revenue' => $rTotal,
+                        'total_energy_revenue_bob' => $rEnergyTotal,
+                        'total_gross_revenue' => $rEnergyTotal, // Kept for backward compatibility
+                        'parking_fee_gross_bob' => $mFeeGross,
+                        'parking_fee_discount_bob' => $mFeeDiscount,
+                        'parking_fee_net_bob' => $mFeeNet,
+                        'parking_fee_bob' => $mFeeNet,
+                        'total_billed_with_parking_bob' => $rMonthTotalOverall,
+                        'sessions_count' => $mSessionsCount,
+                        'sessions_with_parking_fee' => $mSessionsWithFee,
                     ];
                 }
 
@@ -250,15 +311,21 @@ class AetnBillingReportController extends Controller
 
                 return [
                     'success' => true,
-                    'has_data' => count($resultMonthly) > 0 && $grandTotalKwhRounded > 0,
+                    'has_data' => count($resultMonthly) > 0 && ($grandTotalKwhRounded > 0 || $totalParkingFeeNet > 0),
                     'rates_applied' => $latestRates,
                     'summary_totals' => [
                         'total_sessions' => $sessions->count(),
+                        'sessions_with_parking_fee' => $totalSessionsWithFee,
                         'grand_total_kwh' => $grandTotalKwhRounded,
                         'total_kwh_alto' => $totalKwhAltoRounded,
                         'total_kwh_medio' => $totalKwhMedioRounded,
                         'total_kwh_bajo' => $totalKwhBajoRounded,
-                        'grand_total_gross_revenue_bob' => round($totalGrossRevenue, 2),
+                        'grand_total_energy_revenue_bob' => round($totalEnergyRevenue, 2),
+                        'grand_total_gross_revenue_bob' => round($totalEnergyRevenue, 2),
+                        'grand_total_parking_fee_gross_bob' => round($totalParkingFeeGross, 2),
+                        'grand_total_parking_fee_discount_bob' => round($totalParkingFeeDiscount, 2),
+                        'grand_total_parking_fee_bob' => round($totalParkingFeeNet, 2),
+                        'grand_total_billed_with_parking_bob' => round($totalBilledOverall, 2),
                     ],
                     'monthly_details' => $resultMonthly,
                     'block_definitions' => $blockDefinitions,

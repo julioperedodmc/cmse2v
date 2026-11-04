@@ -35,49 +35,92 @@ class TariffResource extends Resource
                                     ])
                                     ->default('BOB')
                                     ->required(),
-                                Forms\Components\TextInput::make('price_session')
-                                    ->label('Connection Fee')
-                                    ->numeric()
-                                    ->default(0)
-                                    ->prefix('Bs'),
-                                Forms\Components\Toggle::make('is_parking_fee_enabled')
-                                    ->label('¿Habilitar Fee de Parqueo?')
-                                    ->default(true)
-                                    ->helperText('Si se desactiva, no se cobrará el cargo inicial a nadie.'),
-                                Forms\Components\Grid::make(2)
+                                Forms\Components\Fieldset::make('Cargo por Inicio de Sesión / Conexión (Fee)')
                                     ->schema([
-                                        Forms\Components\Toggle::make('apply_fee_to_cards')
-                                            ->label('Aplicar Fee a Tarjetas')
-                                            ->default(false),
-                                        Forms\Components\Toggle::make('apply_fee_to_app')
-                                            ->label('Aplicar Fee a App Móvil')
-                                            ->default(true),
-                                    ])->visible(fn ($get) => $get('is_parking_fee_enabled')),
+                                        Forms\Components\Toggle::make('is_parking_fee_enabled')
+                                            ->label('¿Habilitar Fee de Inicio / Conexión?')
+                                            ->default(true)
+                                            ->helperText('Si se desactiva, no se cobrará el cargo inicial a ninguna modalidad.')
+                                            ->live()
+                                            ->columnSpanFull(),
 
-                                Forms\Components\TextInput::make('free_minutes')
-                                    ->label('Grace Period')
-                                    ->numeric()
-                                    ->default(0)
-                                    ->suffix('min'),
-                                Forms\Components\Toggle::make('is_time_fee_enabled')
-                                    ->label('¿Habilitar Fee de Tiempo?')
-                                    ->default(true)
-                                    ->helperText('Si se desactiva, no se aplicarán multas por tiempo.'),
-                                Forms\Components\TextInput::make('discount_fixed_amount')
-                                    ->label('Descuento Fijo (Bs)')
-                                    ->numeric()
-                                    ->default(0)
-                                    ->prefix('Bs')
-                                    ->helperText('Monto fijo de descuento aplicado al total de la sesión.'),
-                                Forms\Components\Grid::make(2)
+                                        Forms\Components\TextInput::make('price_session')
+                                            ->label('Monto del Fee')
+                                            ->numeric()
+                                            ->default(0)
+                                            ->prefix(fn (Forms\Get $get) => $get('currency') === 'USD' ? '$' : 'Bs')
+                                            ->columnSpanFull()
+                                            ->visible(fn (Forms\Get $get) => (bool) $get('is_parking_fee_enabled')),
+
+                                        Forms\Components\Fieldset::make('¿A quiénes se aplica el Fee?')
+                                            ->schema([
+                                                Forms\Components\Toggle::make('apply_fee_to_dealership_cards')
+                                                    ->label('Concesionarias / Empresas')
+                                                    ->helperText('Tarjetas RFID corporativas (SACI, Hansa, etc.)')
+                                                    ->default(true),
+                                                Forms\Components\Toggle::make('apply_fee_to_app')
+                                                    ->label('App Móvil')
+                                                    ->helperText('Usuarios que inician carga desde la app')
+                                                    ->default(true),
+                                                Forms\Components\Toggle::make('apply_fee_to_cards')
+                                                    ->label('Tarjetas Particulares')
+                                                    ->helperText('Tarjetas RFID B2C de clientes particulares')
+                                                    ->default(false),
+                                            ])
+                                            ->columns(1)
+                                            ->columnSpanFull()
+                                            ->visible(fn (Forms\Get $get) => (bool) $get('is_parking_fee_enabled')),
+                                    ])
+                                    ->columnSpanFull(),
+
+                                Forms\Components\Fieldset::make('Multa por Tiempo Excedido (Time Penalty)')
                                     ->schema([
-                                        Forms\Components\Toggle::make('apply_discount_to_cards')
-                                            ->label('Descuento a Tarjetas')
-                                            ->default(false),
-                                        Forms\Components\Toggle::make('apply_discount_to_app')
-                                            ->label('Descuento a App Móvil')
-                                            ->default(true),
-                                    ])->visible(fn ($get) => $get('discount_fixed_amount') > 0),
+                                        Forms\Components\Toggle::make('is_time_fee_enabled')
+                                            ->label('¿Habilitar Multa por Tiempo Excedido?')
+                                            ->default(true)
+                                            ->helperText('Si se desactiva, no se aplicarán multas por tiempo a ninguna modalidad.')
+                                            ->live()
+                                            ->columnSpanFull(),
+
+                                        Forms\Components\TextInput::make('free_minutes')
+                                            ->label('Tiempo de Gracia (Minutos de Cortesía)')
+                                            ->helperText('Minutos permitidos antes de comenzar a cobrar la multa por tiempo excedido.')
+                                            ->numeric()
+                                            ->default(0)
+                                            ->suffix('min')
+                                            ->columnSpanFull()
+                                            ->visible(fn (Forms\Get $get) => (bool) $get('is_time_fee_enabled')),
+                                    ])
+                                    ->columnSpanFull(),
+
+                                Forms\Components\Fieldset::make('Descuento Fijo por Sesión')
+                                    ->schema([
+                                        Forms\Components\TextInput::make('discount_fixed_amount')
+                                            ->label('Monto del Descuento Fijo')
+                                            ->numeric()
+                                            ->default(0)
+                                            ->prefix(fn (Forms\Get $get) => $get('currency') === 'USD' ? '$' : 'Bs')
+                                            ->helperText('Monto a descontar del cargo inicial de la sesión.')
+                                            ->live()
+                                            ->columnSpanFull(),
+
+                                        Forms\Components\Fieldset::make('¿A quiénes se aplica el Descuento?')
+                                            ->schema([
+                                                Forms\Components\Toggle::make('apply_discount_to_app')
+                                                    ->label('App Móvil')
+                                                    ->default(true),
+                                                Forms\Components\Toggle::make('apply_discount_to_dealership_cards')
+                                                    ->label('Concesionarias / Empresas')
+                                                    ->default(false),
+                                                Forms\Components\Toggle::make('apply_discount_to_cards')
+                                                    ->label('Tarjetas Particulares')
+                                                    ->default(false),
+                                            ])
+                                            ->columns(1)
+                                            ->columnSpanFull()
+                                            ->visible(fn (Forms\Get $get) => (float) $get('discount_fixed_amount') > 0),
+                                    ])
+                                    ->columnSpanFull(),
 
                                 Forms\Components\Section::make('Notificación de Carga Alcanzada')
                                     ->description('Aviso automático al usuario cuando el vehículo llega a un nivel de batería específico.')

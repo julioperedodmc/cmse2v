@@ -135,6 +135,11 @@ class OperationsReportController extends Controller
                 $startLocal = $s->start_time ? \Carbon\Carbon::parse($s->start_time)->setTimezone('America/La_Paz') : null;
                 $stopLocal = $s->stop_time ? \Carbon\Carbon::parse($s->stop_time)->setTimezone('America/La_Paz') : null;
 
+                $rawFee = (float) ($s->session_fee ?? 0);
+                $discount = (float) ($s->discount_amount ?? 0);
+                $feeDiscount = min($discount, $rawFee);
+                $netFee = max(0.0, $rawFee - $feeDiscount);
+
                 return [
                     'id' => $s->id,
                     'transaction_id' => $s->transaction_id,
@@ -150,6 +155,10 @@ class OperationsReportController extends Controller
                     'start_time_utc' => $s->start_time ? \Carbon\Carbon::parse($s->start_time)->toDateTimeString() : null,
                     'stop_time_utc' => $s->stop_time ? \Carbon\Carbon::parse($s->stop_time)->toDateTimeString() : null,
                     'energy_kwh' => (float) $s->total_energy_kwh,
+                    'parking_fee_gross_bob' => $rawFee,
+                    'parking_fee_discount_bob' => $feeDiscount,
+                    'parking_fee_bob' => $netFee,
+                    'energy_cost_bob' => (float) ($s->energy_cost ?? 0),
                     'total_cost_bob' => (float) $s->total_cost,
                     'stop_reason' => $s->stop_reason,
                     'connector_type' => $s->mapped_connector_type,

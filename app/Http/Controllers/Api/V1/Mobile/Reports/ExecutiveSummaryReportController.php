@@ -35,13 +35,19 @@ class ExecutiveSummaryReportController extends Controller
         $kpiData = (clone $completedQuery)->selectRaw('
             SUM(total_energy_kwh) as total_energy,
             SUM(total_cost) as total_revenue,
-            SUM(energy_cost) as total_energy_cost
+            SUM(energy_cost) as total_energy_cost,
+            SUM(session_fee) as total_parking_fee_gross,
+            SUM(LEAST(IFNULL(discount_amount, 0), IFNULL(session_fee, 0))) as total_parking_fee_discount,
+            SUM(GREATEST(0, IFNULL(session_fee, 0) - LEAST(IFNULL(discount_amount, 0), IFNULL(session_fee, 0)))) as total_parking_fee_net
         ')->first();
 
         $totalEnergyKwh = round($kpiData->total_energy ?? 0, 1);
         $totalEnergyMwh = round($totalEnergyKwh / 1000, 3);
         $totalRevenueBob = round($kpiData->total_revenue ?? 0, 2);
         $totalEnergyCost = $kpiData->total_energy_cost ?? 0;
+        $totalParkingFeeGross = round($kpiData->total_parking_fee_gross ?? 0, 2);
+        $totalParkingFeeDiscount = round($kpiData->total_parking_fee_discount ?? 0, 2);
+        $totalParkingFeeNet = round($kpiData->total_parking_fee_net ?? 0, 2);
         $avgBobPerKwh = $totalEnergyKwh > 0 ? round($totalEnergyCost / $totalEnergyKwh, 2) : 0;
 
         // Calculate total recharged amount (Total Facturado App Billetera)
@@ -187,6 +193,11 @@ class ExecutiveSummaryReportController extends Controller
                     'total_energy_kwh' => $totalEnergyKwh,
                     'total_energy_mwh' => $totalEnergyMwh,
                     'total_revenue_bob' => round($totalEnergyCost, 2),
+                    'total_energy_cost_bob' => round($totalEnergyCost, 2),
+                    'total_parking_fee_gross_bob' => $totalParkingFeeGross,
+                    'total_parking_fee_discount_bob' => $totalParkingFeeDiscount,
+                    'total_parking_fee_bob' => $totalParkingFeeNet,
+                    'total_session_revenue_bob' => $totalRevenueBob,
                     'total_facturado_bob' => round($totalFacturado, 2),
                     'total_excluido_bob' => round($totalExcluido, 2),
                     'total_facturado_credito_bob' => round($totalFacturadoCredito, 2),

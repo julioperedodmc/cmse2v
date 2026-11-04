@@ -297,7 +297,7 @@ class ChargingSessionController extends Controller
                 'start_time' => now(),
                 'total_energy_kwh' => 0.0,
                 'total_cost' => 0.0,
-                'currency' => $station->tariff->currency ?? 'USD',
+                'currency' => $station->tariff->currency ?? 'BOB',
                 'vehicle_id' => $vehicle?->id,
                 'vehicle_brand' => $vehicle?->brand,
                 'vehicle_model' => $vehicle?->model,
