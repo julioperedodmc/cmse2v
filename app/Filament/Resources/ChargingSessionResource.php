@@ -249,6 +249,28 @@ class ChargingSessionResource extends Resource
                     ])
                     ->label('Estado de Sesión'),
 
+                Tables\Filters\Filter::make('date_range')
+                    ->label('Rango de Fechas')
+                    ->form([
+                        Forms\Components\DatePicker::make('date_from')
+                            ->label('Desde')
+                            ->placeholder('dd/mm/aaaa'),
+                        Forms\Components\DatePicker::make('date_until')
+                            ->label('Hasta')
+                            ->placeholder('dd/mm/aaaa'),
+                    ])
+                    ->query(function (Builder $query, array $data): Builder {
+                        return $query
+                            ->when(
+                                $data['date_from'],
+                                fn (Builder $query, $date): Builder => $query->whereDate('start_time', '>=', $date),
+                            )
+                            ->when(
+                                $data['date_until'],
+                                fn (Builder $query, $date): Builder => $query->whereDate('start_time', '<=', $date),
+                            );
+                    }),
+
                 Tables\Filters\SelectFilter::make('client_type')
                     ->label('Tipo de Cliente / Origen')
                     ->options([

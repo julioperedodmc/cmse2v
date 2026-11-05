@@ -86,16 +86,20 @@ class WalletTransactionResource extends Resource
                     ->sortable(),
                 Tables\Columns\TextColumn::make('user.name')
                     ->label('Usuario')
-                    ->searchable(),
+                    ->searchable()
+                    ->sortable(),
                 Tables\Columns\TextColumn::make('user.email')
                     ->label('Correo')
                     ->searchable()
+                    ->sortable()
                     ->toggleable(isToggledHiddenByDefault: false),
                 Tables\Columns\TextColumn::make('user.billing_document')
                     ->label('NIT/CI')
-                    ->searchable(),
+                    ->searchable()
+                    ->sortable(),
                 Tables\Columns\TextColumn::make('type')
                     ->badge()
+                    ->sortable()
                     ->color(fn(string $state): string => match ($state) {
                         'RECHARGE' => 'success',
                         'CHARGE' => 'danger',
@@ -111,9 +115,11 @@ class WalletTransactionResource extends Resource
                 Tables\Columns\TextColumn::make('balance_after')
                     ->label('Balance')
                     ->money(fn($record) => $record->currency)
+                    ->sortable()
                     ->color('gray'),
                 Tables\Columns\TextColumn::make('status')
                     ->badge()
+                    ->sortable()
                     ->color(fn(string $state): string => match ($state) {
                         'COMPLETED' => 'success',
                         'PENDING' => 'warning',
@@ -131,6 +137,7 @@ class WalletTransactionResource extends Resource
                 Tables\Columns\TextColumn::make('payment_method')
                     ->label('Método')
                     ->badge()
+                    ->sortable()
                     ->color(fn(string $state): string => match ($state) {
                         'CREDITO' => 'danger',
                         'MANUAL_CASH' => 'success',
