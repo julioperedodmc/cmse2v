@@ -93,6 +93,7 @@ class User extends Authenticatable implements \Filament\Models\Contracts\Filamen
     protected $fillable = [
         'company_id',
         'is_admin',
+        'is_active',
         'name',
         'email',
         'password',
@@ -128,6 +129,8 @@ class User extends Authenticatable implements \Filament\Models\Contracts\Filamen
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'is_admin' => 'boolean',
+            'is_active' => 'boolean',
         ];
     }
 }

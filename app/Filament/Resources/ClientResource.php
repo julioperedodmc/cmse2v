@@ -80,6 +80,9 @@ class ClientResource extends Resource
                         Forms\Components\TextInput::make('billing_razon_social')
                             ->label('Razón Social para Factura')
                             ->maxLength(255),
+                        Forms\Components\Toggle::make('is_active')
+                            ->label('Usuario Activo')
+                            ->default(true),
                     ])->columns(2),
             ]);
     }
@@ -92,6 +95,9 @@ class ClientResource extends Resource
                     ->schema([
                         Infolists\Components\TextEntry::make('name')->label('Nombre'),
                         Infolists\Components\TextEntry::make('email')->label('Email'),
+                        Infolists\Components\IconEntry::make('is_active')
+                            ->label('Estado Cuenta')
+                            ->boolean(),
                         Infolists\Components\TextEntry::make('phone')->label('Teléfono'),
                         Infolists\Components\TextEntry::make('created_at')->label('Fecha Registro')->dateTime(),
                         Infolists\Components\TextEntry::make('active_sessions')
@@ -188,6 +194,10 @@ class ClientResource extends Resource
                 Tables\Columns\TextColumn::make('phone')
                     ->label('Teléfono')
                     ->searchable(),
+                Tables\Columns\IconColumn::make('is_active')
+                    ->label('Activo')
+                    ->boolean()
+                    ->sortable(),
                 Tables\Columns\TextColumn::make('created_at')
                     ->label('Registrado el')
                     ->dateTime()
@@ -205,6 +215,10 @@ class ClientResource extends Resource
                 Tables\Filters\Filter::make('is_b2c')
                     ->label('Solo Particulares B2C')
                     ->query(fn (Builder $query) => $query->whereNull('company_id')),
+                Tables\Filters\TernaryFilter::make('is_active')
+                    ->label('Estado de Cuenta')
+                    ->trueLabel('Solo Activos')
+                    ->falseLabel('Solo Desactivados'),
             ])
             ->actions([
                 Tables\Actions\ViewAction::make(),
