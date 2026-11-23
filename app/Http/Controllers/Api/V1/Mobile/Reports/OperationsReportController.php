@@ -24,7 +24,7 @@ class OperationsReportController extends Controller
 
             $localTimeExpr = 'DATE_SUB(charging_sessions.start_time, INTERVAL 4 HOUR)';
 
-        $dailyAttempts = (clone $baseQuery)
+        $dailyAttemptsQuery = (clone $baseQuery)
             ->selectRaw("
                 DATE($localTimeExpr) as date,
                 SUM(CASE WHEN charging_sessions.status = 'Completed' THEN 1 ELSE 0 END) as completed_count,
@@ -32,9 +32,13 @@ class OperationsReportController extends Controller
                 COUNT(charging_sessions.id) as total_attempts
             ")
             ->groupBy('date')
-            ->orderBy('date', 'desc')
-            ->limit(30)
-            ->get();
+            ->orderBy('date', 'desc');
+
+        if (!$request->query('startDate') && !$request->query('endDate') && !$request->query('month')) {
+            $dailyAttemptsQuery->limit(30);
+        }
+
+        $dailyAttempts = $dailyAttemptsQuery->get();
 
         $failuresByStation = (clone $baseQuery)
             ->where('charging_sessions.status', 'Failed')

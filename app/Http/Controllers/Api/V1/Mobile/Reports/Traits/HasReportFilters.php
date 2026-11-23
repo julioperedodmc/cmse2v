@@ -51,17 +51,19 @@ trait HasReportFilters
 
         $localTimeExpr = 'DATE_SUB(charging_sessions.start_time, INTERVAL 4 HOUR)';
 
-        if ($month) {
-            $carbonMonth = Carbon::parse($month . '-01');
-            $query->whereRaw("DATE($localTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
-                ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
-        } else {
+        // Si se provee rango explícito de fechas (startDate o endDate), tiene precedencia para permitir rangos libres.
+        // Si no se proveen fechas específicas pero sí un mes (YYYY-MM), se filtra por dicho mes completo.
+        if ($startDate || $endDate) {
             if ($startDate) {
                 $query->whereRaw("DATE($localTimeExpr) >= ?", [$startDate]);
             }
             if ($endDate) {
                 $query->whereRaw("DATE($localTimeExpr) <= ?", [$endDate]);
             }
+        } elseif ($month) {
+            $carbonMonth = Carbon::parse($month . '-01');
+            $query->whereRaw("DATE($localTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
+                ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
         }
 
         if ($stationId) {

@@ -111,15 +111,7 @@ class ExecutiveSummaryReportController extends Controller
         $month = $request->query('month');
         $localTimeExpr = 'DATE_SUB(created_at, INTERVAL 4 HOUR)';
 
-        if ($month) {
-            $carbonMonth = Carbon::parse($month . '-01');
-            $rechargesQuery->whereRaw("DATE($localTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
-                ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
-            $excludedRechargesQuery->whereRaw("DATE($localTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
-                ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
-            $creditQuery->whereRaw("DATE($localTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
-                ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
-        } else {
+        if ($startDate || $endDate) {
             if ($startDate) {
                 $rechargesQuery->whereRaw("DATE($localTimeExpr) >= ?", [$startDate]);
                 $excludedRechargesQuery->whereRaw("DATE($localTimeExpr) >= ?", [$startDate]);
@@ -130,6 +122,14 @@ class ExecutiveSummaryReportController extends Controller
                 $excludedRechargesQuery->whereRaw("DATE($localTimeExpr) <= ?", [$endDate]);
                 $creditQuery->whereRaw("DATE($localTimeExpr) <= ?", [$endDate]);
             }
+        } elseif ($month) {
+            $carbonMonth = Carbon::parse($month . '-01');
+            $rechargesQuery->whereRaw("DATE($localTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
+                ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
+            $excludedRechargesQuery->whereRaw("DATE($localTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
+                ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
+            $creditQuery->whereRaw("DATE($localTimeExpr) >= ?", [$carbonMonth->startOfMonth()->toDateString()])
+                ->whereRaw("DATE($localTimeExpr) <= ?", [$carbonMonth->endOfMonth()->toDateString()]);
         }
         $totalFacturado = (float) $rechargesQuery->sum('amount');
         $totalExcluido = (float) $excludedRechargesQuery->sum('amount');
