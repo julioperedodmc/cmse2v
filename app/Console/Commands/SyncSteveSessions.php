@@ -135,7 +135,7 @@ class SyncSteveSessions extends Command
                                 'meter_stop' => $meterStop,
                                 'total_energy_kwh' => $energyKwh,
                                 'total_cost' => 0,
-                                'currency' => $station->tariff->currency ?? 'USD',
+                                'currency' => $station->tariff->currency ?? 'BOB',
                                 'status' => $status,
                                 'stop_reason' => $s->stop_reason,
                             ]

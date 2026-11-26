@@ -40,6 +40,7 @@ class SystemSetting extends Model
         'product_connection_id',
         'product_penalty_id',
         'waive_parking_fee_for_cards',
+        'waive_parking_fee_for_dealerships',
         'restrict_charging_without_vehicle',
         'mail_host',
         'mail_port',
@@ -48,6 +49,14 @@ class SystemSetting extends Model
         'mail_password',
         'mail_from_address',
         'mail_from_name',
+    ];
+
+    protected $casts = [
+        'waive_parking_fee_for_cards' => 'boolean',
+        'waive_parking_fee_for_dealerships' => 'boolean',
+        'restrict_charging_without_vehicle' => 'boolean',
+        'is_disclaimer_visible' => 'boolean',
+        'invoice_on_bulk_creation' => 'boolean',
     ];
 
     /**

@@ -161,6 +161,13 @@ class AuthController extends Controller
             ]);
         }
 
+        if (isset($user->is_active) && !$user->is_active) {
+            return response()->json([
+                'message' => 'Esta cuenta se encuentra desactivada. Por favor, comunícate con soporte.',
+                'error_code' => 'ACCOUNT_DEACTIVATED',
+            ], 403);
+        }
+
         $token = $user->createToken('mobile-app')->plainTextToken;
 
         return response()->json([
@@ -196,6 +203,13 @@ class AuthController extends Controller
         $googleId = $payload['sub'];
 
         $user = User::where('email', $email)->first();
+
+        if ($user && isset($user->is_active) && !$user->is_active) {
+            return response()->json([
+                'message' => 'Esta cuenta se encuentra desactivada. Por favor, comunícate con soporte.',
+                'error_code' => 'ACCOUNT_DEACTIVATED',
+            ], 403);
+        }
 
         if (!$user) {
             // Register new user
@@ -309,6 +323,13 @@ class AuthController extends Controller
         }
 
         if ($user) {
+            if (isset($user->is_active) && !$user->is_active) {
+                return response()->json([
+                    'message' => 'Esta cuenta se encuentra desactivada. Por favor, comunícate con soporte.',
+                    'error_code' => 'ACCOUNT_DEACTIVATED',
+                ], 403);
+            }
+
             if ($user->apple_sub !== null && $user->apple_sub !== $appleSub) {
                 return response()->json(['message' => 'La cuenta de Apple ya está asociada a otro usuario'], 409);
             }
@@ -463,7 +484,7 @@ class AuthController extends Controller
         }
 
         // Generate 6-digit numeric PIN
-        $pin = str_pad((string)random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
+        $pin = str_pad((string) random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
 
         // Store token in password_reset_tokens
         DB::table('password_reset_tokens')->updateOrInsert(
@@ -554,13 +575,22 @@ class AuthController extends Controller
     {
         $user = $request->user();
 
-        // Execute safety deletion (all cascading logic and anonymization is handled in User's static booted deleting hook!)
+        // Soft deactivation: preserves all financial data, wallets, transactions and charging sessions
         DB::transaction(function () use ($user) {
-            $user->delete();
+            // 1. Mark account as deactivated
+            $user->update(['is_active' => false]);
+
+            // 2. Deactivate any associated RFID tags
+            \App\Models\RfidTag::where('user_id', $user->id)->update([
+                'is_active' => false,
+            ]);
+
+            // 3. Revoke all mobile authentication tokens (logs user out immediately)
+            $user->tokens()->delete();
         });
 
         return response()->json([
-            'message' => 'Tu cuenta y datos personales han sido eliminados de forma exitosa de acuerdo con las normativas GDPR.',
+            'message' => 'Tu cuenta ha sido desactivada de forma exitosa.',
             'status' => 'success',
         ]);
     }

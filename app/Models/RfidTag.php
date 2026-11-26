@@ -57,4 +57,9 @@ class RfidTag extends Model
             },
         );
     }
+
+    public function isDealership(): bool
+    {
+        return !empty($this->company_id) || !empty($this->user?->company_id);
+    }
 }

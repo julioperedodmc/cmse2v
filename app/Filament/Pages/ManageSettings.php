@@ -181,9 +181,13 @@ class ManageSettings extends Page
                             ->helperText('Tiempo en el que no se volverá a cobrar el fee de inicio si un usuario reinicia una carga.'),
 
                         Toggle::make('waive_parking_fee_for_cards')
-                            ->label('Exonerar Fee de Inicio a Tarjetas Físicas')
+                            ->label('Exonerar Fee a Tarjetas Particulares')
                             ->default(false)
-                            ->helperText('Si se activa, a los usuarios con tarjeta no se les cobrará el cargo por conexión, solo a los usuarios de App.'),
+                            ->helperText('Si se activa, a los usuarios con tarjeta particular no se les cobrará el cargo por conexión.'),
+                        Toggle::make('waive_parking_fee_for_dealerships')
+                            ->label('Exonerar Fee a Concesionarias/Empresas')
+                            ->default(false)
+                            ->helperText('Si se activa, a las tarjetas asociadas a concesionarias o flotas empresariales no se les cobrará el cargo por conexión.'),
                         Toggle::make('restrict_charging_without_vehicle')
                             ->label('Restringir carga sin vehículo registrado')
                             ->default(false)

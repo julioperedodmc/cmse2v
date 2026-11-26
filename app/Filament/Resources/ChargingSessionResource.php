@@ -125,11 +125,13 @@ class ChargingSessionResource extends Resource
                 Tables\Columns\TextColumn::make('rfidTag.tag_code')
                     ->label('RFID Tag')
                     ->fontFamily('mono')
+                    ->placeholder('-')
                     ->searchable()
                     ->sortable(),
 
                 Tables\Columns\TextColumn::make('user.name')
                     ->label('Client')
+                    ->placeholder('-')
                     ->description(fn(ChargingSession $record): string => $record->user->email ?? '')
                     ->searchable(query: function (Builder $query, string $search): Builder {
                         return $query->whereHas('user', function (Builder $q) use ($search) {
@@ -138,6 +140,46 @@ class ChargingSessionResource extends Resource
                         });
                     })
                     ->sortable(),
+
+                Tables\Columns\TextColumn::make('client_type')
+                    ->label('Tipo de Cliente')
+                    ->badge()
+                    ->state(function (ChargingSession $record): string {
+                        $tag = $record->rfidTag;
+                        $user = $record->user;
+                        $company = $tag?->company ?? $user?->company;
+
+                        if ($company || !empty($user?->company_id) || !empty($tag?->company_id)) {
+                            return $company?->name ? "Empresa ({$company->name})" : 'Empresa';
+                        }
+
+                        if ($tag && $tag->is_virtual) {
+                            return 'App Móvil';
+                        }
+
+                        if ($tag && !$tag->is_virtual) {
+                            return 'Tarjeta Particular';
+                        }
+
+                        if ($user) {
+                            return 'App Móvil';
+                        }
+
+                        return 'No Identificado';
+                    })
+                    ->color(fn(string $state): string => match (true) {
+                        str_starts_with($state, 'Empresa') => 'primary',
+                        $state === 'App Móvil' => 'success',
+                        $state === 'Tarjeta Particular' => 'warning',
+                        default => 'gray',
+                    })
+                    ->icon(fn(string $state): string => match (true) {
+                        str_starts_with($state, 'Empresa') => 'heroicon-m-building-office',
+                        $state === 'App Móvil' => 'heroicon-m-device-phone-mobile',
+                        $state === 'Tarjeta Particular' => 'heroicon-m-credit-card',
+                        default => 'heroicon-m-question-mark-circle',
+                    })
+                    ->toggleable(),
 
                 Tables\Columns\TextColumn::make('status')
                     ->badge()
@@ -206,6 +248,57 @@ class ChargingSessionResource extends Resource
                         'Faulted' => 'Fallido (Faulted)',
                     ])
                     ->label('Estado de Sesión'),
+
+                Tables\Filters\Filter::make('date_range')
+                    ->label('Rango de Fechas')
+                    ->form([
+                        Forms\Components\DatePicker::make('date_from')
+                            ->label('Desde')
+                            ->placeholder('dd/mm/aaaa'),
+                        Forms\Components\DatePicker::make('date_until')
+                            ->label('Hasta')
+                            ->placeholder('dd/mm/aaaa'),
+                    ])
+                    ->query(function (Builder $query, array $data): Builder {
+                        return $query
+                            ->when(
+                                $data['date_from'],
+                                fn (Builder $query, $date): Builder => $query->whereDate('start_time', '>=', $date),
+                            )
+                            ->when(
+                                $data['date_until'],
+                                fn (Builder $query, $date): Builder => $query->whereDate('start_time', '<=', $date),
+                            );
+                    }),
+
+                Tables\Filters\SelectFilter::make('client_type')
+                    ->label('Tipo de Cliente / Origen')
+                    ->options([
+                        'dealership' => 'Empresa / Concesionaria',
+                        'app' => 'App Móvil',
+                        'physical_b2c' => 'Tarjeta Particular',
+                        'unidentified' => 'No Identificado (Vacíos)',
+                    ])
+                    ->query(function (Builder $query, array $data): Builder {
+                        return match ($data['value'] ?? null) {
+                            'dealership' => $query->where(function (Builder $q) {
+                                $q->whereHas('user', fn($uq) => $uq->whereNotNull('company_id'))
+                                  ->orWhereHas('rfidTag', fn($tq) => $tq->whereNotNull('company_id'));
+                            }),
+                            'app' => $query->where(function (Builder $q) {
+                                $q->whereHas('rfidTag', fn($tq) => $tq->where('is_virtual', true))
+                                  ->orWhere(fn($sq) => $sq->whereNotNull('user_id')->whereNull('rfid_tag_id'));
+                            }),
+                            'physical_b2c' => $query->whereHas('rfidTag', function (Builder $tq) {
+                                $tq->where('is_virtual', false)->whereNull('company_id');
+                            })->where(function (Builder $q) {
+                                $q->whereDoesntHave('user')
+                                  ->orWhereHas('user', fn($uq) => $uq->whereNull('company_id'));
+                            }),
+                            'unidentified' => $query->whereNull('user_id')->whereNull('rfid_tag_id'),
+                            default => $query,
+                        };
+                    }),
             ])
             ->actions([
                 Tables\Actions\EditAction::make(),

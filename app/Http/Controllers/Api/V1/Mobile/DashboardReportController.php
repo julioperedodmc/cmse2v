@@ -12,99 +12,104 @@ class DashboardReportController extends Controller
 {
     public function getSummary(Request $request)
     {
-        // 1. Obtener filtros opcionales
-        $startDate = $request->query('startDate', Carbon::now()->startOfMonth()->toDateString());
-        $endDate = $request->query('endDate', Carbon::now()->endOfMonth()->toDateString());
-        $stationId = $request->query('stationId');
+        $cacheKey = 'report_dashboard_summary_' . md5(json_encode($request->all()));
 
-        // 2. Obtener lista de estaciones para los filtros de la app cliente
-        $stations = Station::select('id', 'name')->get();
+        $response = \Illuminate\Support\Facades\Cache::remember($cacheKey, now()->addMinutes(5), function () use ($request) {
+            // 1. Obtener filtros opcionales
+            $startDate = $request->query('startDate', Carbon::now()->startOfMonth()->toDateString());
+            $endDate = $request->query('endDate', Carbon::now()->endOfMonth()->toDateString());
+            $stationId = $request->query('stationId');
 
-        // 3. Construir la consulta base de sesiones completadas
-        $query = ChargingSession::query()->where('charging_sessions.status', 'Completed');
+            // 2. Obtener lista de estaciones para los filtros de la app cliente
+            $stations = Station::select('id', 'name')->get();
 
-        if ($startDate) {
-            $query->whereDate('charging_sessions.start_time', '>=', $startDate);
-        }
-        if ($endDate) {
-            $query->whereDate('charging_sessions.start_time', '<=', $endDate);
-        }
-        if ($stationId) {
-            $query->where('charging_sessions.station_id', $stationId);
-        }
+            // 3. Construir la consulta base de sesiones completadas
+            $query = ChargingSession::query()->where('charging_sessions.status', 'Completed');
 
-        // 4. KPIs
-        $kpiQuery = clone $query;
-        $kpiData = $kpiQuery->selectRaw('
-            COUNT(*) as total_sessions,
-            SUM(total_energy_kwh) as total_energy,
-            SUM(total_cost) as total_revenue,
-            AVG(TIMESTAMPDIFF(MINUTE, start_time, stop_time)) as avg_duration
-        ')->first();
+            $localTimeExpr = 'DATE_SUB(charging_sessions.start_time, INTERVAL 4 HOUR)';
 
-        $uniqueUsers = (clone $query)->distinct('user_id')->count('user_id');
+            if ($startDate) {
+                $query->whereRaw("DATE($localTimeExpr) >= ?", [$startDate]);
+            }
+            if ($endDate) {
+                $query->whereRaw("DATE($localTimeExpr) <= ?", [$endDate]);
+            }
+            if ($stationId) {
+                $query->where('charging_sessions.station_id', $stationId);
+            }
 
-        $kpis = [
-            'total_sessions' => $kpiData->total_sessions ?? 0,
-            'total_energy' => round($kpiData->total_energy ?? 0, 1),
-            'total_revenue' => round($kpiData->total_revenue ?? 0, 2),
-            'avg_duration' => round($kpiData->avg_duration ?? 0, 0),
-            'unique_users' => $uniqueUsers,
-        ];
+            // 4. KPIs
+            $kpiQuery = clone $query;
+            $kpiData = $kpiQuery->selectRaw('
+                COUNT(*) as total_sessions,
+                SUM(total_energy_kwh) as total_energy,
+                SUM(total_cost) as total_revenue,
+                AVG(TIMESTAMPDIFF(MINUTE, start_time, stop_time)) as avg_duration
+            ')->first();
 
-        // 5. Marcas de Vehículos (Top 10)
-        $brandQuery = clone $query;
-        $brands = $brandQuery->selectRaw('
-            IFNULL(
-                NULLIF(charging_sessions.vehicle_brand, ""),
+            $uniqueUsers = (clone $query)->distinct('user_id')->count('user_id');
+
+            $kpis = [
+                'total_sessions' => $kpiData->total_sessions ?? 0,
+                'total_energy' => round($kpiData->total_energy ?? 0, 1),
+                'total_revenue' => round($kpiData->total_revenue ?? 0, 2),
+                'avg_duration' => round($kpiData->avg_duration ?? 0, 0),
+                'unique_users' => $uniqueUsers,
+            ];
+
+            // 5. Marcas de Vehículos (Top 10)
+            $brandQuery = clone $query;
+            $brands = $brandQuery->selectRaw('
                 IFNULL(
-                    (SELECT brand FROM vehicles WHERE vehicles.user_id = charging_sessions.user_id LIMIT 1),
-                    "No Registrado"
-                )
-            ) as brand,
-            COUNT(*) as sessions_count,
-            SUM(total_energy_kwh) as energy_sum
-        ')
-        ->groupBy('brand')
-        ->orderByDesc('sessions_count')
-        ->limit(10)
-        ->get()
-        ->toArray();
-
-        // 6. Clientes Recurrentes (Top 10)
-        $clientQuery = clone $query;
-        $recurrentClients = $clientQuery->join('users', 'charging_sessions.user_id', '=', 'users.id')
-            ->selectRaw('
-                users.name as client_name,
-                users.email as client_email,
-                COUNT(charging_sessions.id) as sessions_count,
-                SUM(charging_sessions.total_cost) as revenue_sum,
-                SUM(charging_sessions.total_energy_kwh) as energy_sum
+                    NULLIF(charging_sessions.vehicle_brand, ""),
+                    IFNULL(
+                        (SELECT brand FROM vehicles WHERE vehicles.user_id = charging_sessions.user_id LIMIT 1),
+                        "No Registrado"
+                    )
+                ) as brand,
+                COUNT(*) as sessions_count,
+                SUM(total_energy_kwh) as energy_sum
             ')
-            ->groupBy('users.id', 'users.name', 'users.email')
+            ->groupBy('brand')
             ->orderByDesc('sessions_count')
             ->limit(10)
             ->get()
             ->toArray();
 
-        // 7. Horas Pico (Top 8 ordenadas por número de sesiones)
-        $hourQuery = clone $query;
-        $hourlyUsage = $hourQuery->selectRaw('HOUR(charging_sessions.start_time) as hour, COUNT(*) as sessions_count')
-            ->groupBy('hour')
-            ->orderByDesc('sessions_count')
-            ->limit(8)
-            ->get()
-            ->toArray();
+            // 6. Clientes Recurrentes (Top 10)
+            $clientQuery = clone $query;
+            $recurrentClients = $clientQuery->join('users', 'charging_sessions.user_id', '=', 'users.id')
+                ->selectRaw('
+                    users.name as client_name,
+                    users.email as client_email,
+                    COUNT(charging_sessions.id) as sessions_count,
+                    SUM(charging_sessions.total_cost) as revenue_sum,
+                    SUM(charging_sessions.total_energy_kwh) as energy_sum
+                ')
+                ->groupBy('users.id', 'users.name', 'users.email')
+                ->orderByDesc('sessions_count')
+                ->limit(10)
+                ->get()
+                ->toArray();
 
-        $peakHour = !empty($hourlyUsage) ? (int)$hourlyUsage[0]['hour'] : null;
+            // 7. Horas Pico (Top 8 ordenadas por número de sesiones)
+            $hourQuery = clone $query;
+            $hourlyUsage = $hourQuery->selectRaw("HOUR($localTimeExpr) as hour, COUNT(*) as sessions_count")
+                ->groupBy('hour')
+                ->orderByDesc('sessions_count')
+                ->limit(8)
+                ->get()
+                ->toArray();
 
-        // 8. Días de la semana más concurridos
-        $dayQuery = clone $query;
-        $dailyData = $dayQuery->selectRaw('DAYOFWEEK(charging_sessions.start_time) as day_of_week, COUNT(*) as sessions_count')
-            ->groupBy('day_of_week')
-            ->orderBy('day_of_week')
-            ->pluck('sessions_count', 'day_of_week')
-            ->toArray();
+            $peakHour = !empty($hourlyUsage) ? (int)$hourlyUsage[0]['hour'] : null;
+
+            // 8. Días de la semana más concurridos
+            $dayQuery = clone $query;
+            $dailyData = $dayQuery->selectRaw("DAYOFWEEK($localTimeExpr) as day_of_week, COUNT(*) as sessions_count")
+                ->groupBy('day_of_week')
+                ->orderBy('day_of_week')
+                ->pluck('sessions_count', 'day_of_week')
+                ->toArray();
 
         $daysMap = [
             2 => 'Lunes',
@@ -163,25 +168,28 @@ class DashboardReportController extends Controller
                 ->toArray();
         }
 
-        return response()->json([
-            'success' => true,
-            'filters' => [
-                'startDate' => $startDate,
-                'endDate' => $endDate,
-                'stationId' => $stationId,
-            ],
-            'stations' => $stations,
-            'data' => [
-                'kpis' => $kpis,
-                'brands' => $brands,
-                'recurrentClients' => $recurrentClients,
-                'hourlyUsage' => $hourlyUsage,
-                'dailyUsage' => $dailyUsage,
-                'peakHour' => $peakHour,
-                'peakDay' => $maxDayVal > 0 ? $peakDay : null,
-                'connectorUsage' => $connectorUsage,
-                'stationPerformance' => $stationPerformance,
-            ]
-        ]);
+            return [
+                'success' => true,
+                'filters' => [
+                    'startDate' => $startDate,
+                    'endDate' => $endDate,
+                    'stationId' => $stationId,
+                ],
+                'stations' => $stations,
+                'data' => [
+                    'kpis' => $kpis,
+                    'brands' => $brands,
+                    'recurrentClients' => $recurrentClients,
+                    'hourlyUsage' => $hourlyUsage,
+                    'dailyUsage' => $dailyUsage,
+                    'peakHour' => $peakHour,
+                    'peakDay' => $maxDayVal > 0 ? $peakDay : null,
+                    'connectorUsage' => $connectorUsage,
+                    'stationPerformance' => $stationPerformance,
+                ]
+            ];
+        });
+
+        return response()->json($response);
     }
 }

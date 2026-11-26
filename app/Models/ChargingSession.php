@@ -124,4 +124,15 @@ class ChargingSession extends Model
     {
         return \Carbon\Carbon::instance($date)->setTimezone('America/La_Paz')->format('Y-m-d H:i:s');
     }
+
+    public function isDealershipSession(): bool
+    {
+        if ($this->rfidTag && $this->rfidTag->isDealership()) {
+            return true;
+        }
+        if ($this->user && !empty($this->user->company_id)) {
+            return true;
+        }
+        return false;
+    }
 }
