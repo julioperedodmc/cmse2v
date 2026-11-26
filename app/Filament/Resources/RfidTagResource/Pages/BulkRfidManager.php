@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Models\Wallet;
 use App\Models\Company;
 use App\Models\WalletTransaction;
+use App\Services\LibelulaPaymentService;
 use Filament\Forms\Components\Section;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -220,9 +221,20 @@ class BulkRfidManager extends Page
             return;
         }
 
+        $emitInvoice = (bool) ($inputData['emit_invoice'] ?? false);
+        $paymentMethod = $inputData['payment_method'] ?? 'manual';
+        $isManual = $paymentMethod === 'manual';
+        $isCredit = $paymentMethod === 'credit';
+        $vehiclePlate = $inputData['vehicle_plate'] ?? '1111ABC';
+
         $createdCount = 0;
         $errorCount = 0;
+        // Sale transactions whose invoice is requested from Libélula AFTER the sale is committed.
+        $invoiceTxIds = [];
 
+        // Step 1: register the sale (users, tags and sale transactions) and commit it.
+        // Libélula is called only afterwards, so an error or timeout there can no longer
+        // erase a sale that Libélula may already have invoiced.
         DB::beginTransaction();
         try {
             $sharedUserId = null;
@@ -382,8 +394,6 @@ class BulkRfidManager extends Page
                 } else {
                     // FOR INDIVIDUAL USERS: We MUST emit separate invoices AND separate TXs (different clients)
                     if ($userId) {
-                        $isManual = ($inputData['payment_method'] ?? 'manual') === 'manual';
-                        $isCredit = ($inputData['payment_method'] ?? 'manual') === 'credit';
                         $wallet = Wallet::firstOrCreate(['user_id' => $userId], ['balance' => 0, 'currency' => 'BOB']);
                         $tx = WalletTransaction::create([
                             'user_id' => $userId,
@@ -399,30 +409,14 @@ class BulkRfidManager extends Page
                             'metadata' => [
                                 'rfid_tag' => $code,
                                 'line_items' => $tagLineItems,
-                                'should_invoice' => $inputData['emit_invoice'] ?? false,
+                                'should_invoice' => $emitInvoice,
                                 'skip_wallet_update' => true, // Since the tag was already credited
                             ]
                         ]);
 
-                        // Emit invoice if checked. For credit, we want to invoice immediately but keep status as credit.
-                        if ($inputData['emit_invoice'] ?? false) {
-                            $isCredit = ($inputData['payment_method'] ?? 'manual') === 'credit';
-                            $isManual = ($inputData['payment_method'] ?? 'manual') === 'manual';
-
-                            // For manual and credit, we want to emit invoice immediately (isPaid = true for manual, but for credit we pass is_credit = true)
-                            $libService = app(\App\Services\LibelulaPaymentService::class);
-                            $result = $libService->createPayment($wallet, $tagTotal, "Carga inicial RFID $code", [
-                                'emite_factura' => true,
-                                'internal_usage_tx' => true,
-                                'transaction_id' => $tx->id,
-                                'line_items' => $tagLineItems,
-                                'is_credit' => $isCredit,
-                                'vehicle_plate' => $inputData['vehicle_plate'] ?? '1111ABC',
-                            ], $isManual, 0);
-
-                            if (!$result['success']) {
-                                throw new \Exception("Libélula (Tag $code): " . ($result['detail'] ?? $result['message']));
-                            }
+                        if ($emitInvoice) {
+                            $this->registerInvoiceRequest($tx, $tagTotal, "Carga inicial RFID $code", $tagLineItems, 0, $isManual, $isCredit, $vehiclePlate);
+                            $invoiceTxIds[] = $tx->id;
                         }
                     }
                 }
@@ -432,8 +426,6 @@ class BulkRfidManager extends Page
 
             // FINAL STEP: Create ONE Master Transaction for corporate/existing users
             if ($assignmentType !== 'individual' && !empty($allLineItems) && $userId) {
-                $isManual = ($inputData['payment_method'] ?? 'manual') === 'manual';
-                $isCredit = ($inputData['payment_method'] ?? 'manual') === 'credit';
                 $wallet = Wallet::firstOrCreate(['user_id' => $userId], ['balance' => 0, 'currency' => 'BOB']);
 
                 // One single transaction for the whole batch
@@ -452,57 +444,111 @@ class BulkRfidManager extends Page
                         'tag_codes' => $tagCodesList,
                         'line_items' => $allLineItems,
                         'global_discount' => $globalDiscount,
-                        'should_invoice' => $inputData['emit_invoice'] ?? false,
+                        'should_invoice' => $emitInvoice,
                         'skip_wallet_update' => true, // CRITICAL: Balance is already on tags!
                     ]
                 ]);
 
-                // Emit invoice if checked. For credit, we want to invoice immediately but keep status as credit.
-                if ($inputData['emit_invoice'] ?? false) {
-                    $libService = app(\App\Services\LibelulaPaymentService::class);
-                    $result = $libService->createPayment($wallet, $masterTx->amount, $masterTx->description, [
-                        'emite_factura' => true,
-                        'internal_usage_tx' => true,
-                        'transaction_id' => $masterTx->id,
-                        'line_items' => $allLineItems,
-                        'is_credit' => $isCredit,
-                        'vehicle_plate' => $inputData['vehicle_plate'] ?? '1111ABC',
-                    ], $isManual, $globalDiscount);
-
-                    if (!$result['success']) {
-                        throw new \Exception("Libélula (Lote): " . ($result['detail'] ?? $result['message']));
-                    }
+                if ($emitInvoice) {
+                    $this->registerInvoiceRequest($masterTx, (float) $masterTx->amount, $masterTx->description, $allLineItems, $globalDiscount, $isManual, $isCredit, $vehiclePlate);
+                    $invoiceTxIds[] = $masterTx->id;
                 }
             }
 
             DB::commit();
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            Notification::make()
+                ->title('Error en el proceso')
+                ->body('No se creó ninguna tarjeta ni se pidió ninguna factura: ' . $e->getMessage())
+                ->danger()
+                ->persistent()
+                ->send();
+            return;
+        }
 
-            $bodyMessage = "Se crearon $createdCount tarjetas. $errorCount omitidas.";
-            if ($inputData['emit_invoice'] ?? false) {
-                if ($isManual) {
-                    $bodyMessage = "Tarjetas creadas. Recarga y Factura procesadas.";
-                } elseif ($isCredit) {
-                    $bodyMessage = "Tarjetas creadas a crédito y Facturas emitidas.";
+        // Step 2: request the invoices. Each one is independent and keeps a stable identificador,
+        // so a failure leaves that sale registered with its invoice "en duda" instead of erasing it.
+        $issued = 0;
+        $uncertain = [];
+        if (!empty($invoiceTxIds)) {
+            $libService = app(LibelulaPaymentService::class);
+            foreach ($invoiceTxIds as $txId) {
+                $tx = WalletTransaction::find($txId);
+                $result = $libService->issueStoredInvoice($tx);
+                if ($result['success']) {
+                    $issued++;
                 } else {
-                    $bodyMessage = "Tarjetas creadas. Enlaces de pago generados en Libélula.";
+                    $uncertain[] = "#{$txId}: " . ($result['detail'] ?? $result['message'] ?? 'Error desconocido');
                 }
             }
+        }
 
+        $bodyMessage = "Se crearon $createdCount tarjetas. $errorCount omitidas.";
+        if ($emitInvoice) {
+            if ($isManual) {
+                $bodyMessage .= " Facturas emitidas: $issued.";
+            } elseif ($isCredit) {
+                $bodyMessage .= " Tarjetas a crédito. Facturas emitidas: $issued.";
+            } else {
+                $bodyMessage .= " Enlaces de pago generados en Libélula: $issued.";
+            }
+        }
+
+        if (!empty($uncertain)) {
+            Notification::make()
+                ->title('Tarjetas creadas; factura en duda')
+                ->body($bodyMessage . ' Libélula no confirmó ' . count($uncertain) . ' factura(s). Pudo haberla emitido igual: '
+                    . 'no vuelvas a crear las tarjetas. Usa "Reintentar factura" en Movimientos de billetera, que reutiliza el mismo identificador. '
+                    . implode(' | ', $uncertain))
+                ->warning()
+                ->persistent()
+                ->send();
+        } else {
             Notification::make()
                 ->title('Proceso completado')
                 ->body($bodyMessage)
                 ->success()
                 ->send();
-
-            $this->form->fill();
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            Notification::make()
-                ->title('Error en el proceso')
-                ->body($e->getMessage())
-                ->danger()
-                ->send();
         }
+
+        $this->form->fill();
+    }
+
+    /**
+     * Stores everything needed to request (and later retry) the invoice of a sale transaction,
+     * with an identificador that never changes between attempts.
+     */
+    private function registerInvoiceRequest(
+        WalletTransaction $tx,
+        float $amount,
+        string $description,
+        array $lineItems,
+        float $discount,
+        bool $isManual,
+        bool $isCredit,
+        string $vehiclePlate
+    ): void {
+        $identifier = 'BULK-' . $tx->id;
+
+        $metadata = $tx->metadata ?? [];
+        $metadata['invoice_state'] = LibelulaPaymentService::INVOICE_PENDING;
+        $metadata['invoice_request'] = [
+            'identifier' => $identifier,
+            'amount' => round($amount, 2),
+            'description' => $description,
+            'line_items' => $lineItems,
+            'discount' => $discount,
+            'is_paid' => $isManual,
+            'is_credit' => $isCredit,
+            'vehicle_plate' => $vehiclePlate,
+        ];
+
+        $attributes = ['metadata' => $metadata];
+        if (\Illuminate\Support\Facades\Schema::hasColumn('wallet_transactions', 'libelula_identifier')) {
+            $attributes['libelula_identifier'] = $identifier;
+        }
+
+        $tx->forceFill($attributes)->save();
     }
 }
