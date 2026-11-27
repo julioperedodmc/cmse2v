@@ -148,6 +148,12 @@ class WalletTransactionResource extends Resource
             ])
             ->defaultSort('created_at', 'desc')
             ->filters([
+                Tables\Filters\Filter::make('invoice_uncertain')
+                    ->label('Factura en duda')
+                    ->query(fn(Builder $query): Builder => $query->whereIn('metadata->invoice_state', [
+                        \App\Services\LibelulaPaymentService::INVOICE_PENDING,
+                        \App\Services\LibelulaPaymentService::INVOICE_UNCERTAIN,
+                    ])),
                 Tables\Filters\SelectFilter::make('type')
                     ->options([
                         'RECHARGE' => 'Recarga (Recharge)',
@@ -184,8 +190,21 @@ class WalletTransactionResource extends Resource
                         
                         $libService = app(\App\Services\LibelulaPaymentService::class);
 
+                        // Sales whose invoice was already requested with a stable identificador
+                        // (card sales from the panel) must never get a second, new invoice here.
+                        $hasStoredInvoice = !empty($metadata['invoice_request']);
+                        if ($hasStoredInvoice && ($metadata['invoice_state'] ?? null) !== \App\Services\LibelulaPaymentService::INVOICE_ISSUED) {
+                            Notification::make()
+                                ->title('Factura en duda')
+                                ->body('Libélula no confirmó la factura de este movimiento. Usa "Reintentar factura" antes de validar el pago.')
+                                ->danger()
+                                ->persistent()
+                                ->send();
+                            return;
+                        }
+
                         // If it has already been invoiced (has invoice_url), we don't invoice again!
-                        if ($shouldInvoice && empty($record->invoice_url)) {
+                        if ($shouldInvoice && empty($record->invoice_url) && !$hasStoredInvoice) {
                             // Use the specific MANUAL method that Rafael requested
                             $result = $libService->createManualInvoice(
                                 $record, 
@@ -237,6 +256,40 @@ class WalletTransactionResource extends Resource
                             Notification::make()
                                 ->title($shouldInvoice ? 'Pago Validado (Factura ya emitida)' : 'Pago Validado Correctamente')
                                 ->success()
+                                ->send();
+                        }
+                    }),
+                Tables\Actions\Action::make('retry_invoice')
+                    ->label('Reintentar factura')
+                    ->icon('heroicon-o-arrow-path')
+                    ->color('danger')
+                    ->requiresConfirmation()
+                    ->modalDescription('Se vuelve a pedir la factura a Libélula con el mismo identificador. Si Libélula ya la había emitido, no se crea otra.')
+                    ->visible(
+                        fn(WalletTransaction $record): bool =>
+                        in_array(($record->metadata ?? [])['invoice_state'] ?? null, [
+                            \App\Services\LibelulaPaymentService::INVOICE_PENDING,
+                            \App\Services\LibelulaPaymentService::INVOICE_UNCERTAIN,
+                        ], true) &&
+                        auth()->user()->hasRole(['super_admin', 'system_accountant', 'kiosko'])
+                    )
+                    ->action(function (WalletTransaction $record) {
+                        $result = app(\App\Services\LibelulaPaymentService::class)->issueStoredInvoice($record);
+
+                        if ($result['success']) {
+                            Notification::make()
+                                ->title('Factura confirmada por Libélula')
+                                ->body(empty($record->fresh()->invoice_url)
+                                    ? 'Libélula indicó que la factura ya existía. Descárgala desde Libélula con el identificador ' . ($record->metadata['invoice_request']['identifier'] ?? '') . '.'
+                                    : null)
+                                ->success()
+                                ->send();
+                        } else {
+                            Notification::make()
+                                ->title('La factura sigue en duda')
+                                ->body($result['detail'] ?? $result['message'] ?? 'Error desconocido')
+                                ->danger()
+                                ->persistent()
                                 ->send();
                         }
                     }),

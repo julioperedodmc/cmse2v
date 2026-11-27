@@ -11,6 +11,10 @@ use Illuminate\Support\Facades\Schema;
 
 class LibelulaPaymentService
 {
+    public const INVOICE_PENDING = 'PENDING';
+    public const INVOICE_ISSUED = 'ISSUED';
+    public const INVOICE_UNCERTAIN = 'UNCERTAIN';
+
     protected string $baseUrl;
     protected string $apiKey;
 
@@ -219,7 +223,7 @@ class LibelulaPaymentService
 
             if (!$resp->successful() || ($errorCode !== 0 && !$isAlreadyExists)) {
                 $msg = $data['mensaje'] ?? ('HTTP ' . $resp->status());
-                $this->markFailed($txId, ['error' => $msg, 'response' => $data]);
+                $this->recordFailure($txId, ['error' => $msg, 'response' => $data], $invoiceData);
 
                 return [
                     'success' => false,
@@ -304,7 +308,7 @@ class LibelulaPaymentService
             ];
         } catch (\Throwable $e) {
             if ($txId) {
-                $this->markFailed($txId, ['exception' => $e->getMessage()]);
+                $this->recordFailure($txId, ['exception' => $e->getMessage()], $invoiceData);
             }
             Log::error('Libelula createPayment exception', ['error' => $e->getMessage()]);
 
@@ -575,7 +579,7 @@ class LibelulaPaymentService
                     ?? $tx->invoice_url;
             }
             if (Schema::hasColumn('wallet_transactions', 'metadata')) {
-                $update['metadata'] = json_encode(['webhook' => $payload]);
+                $update['metadata'] = json_encode(array_merge(is_array($metadata) ? $metadata : [], ['webhook' => $payload]));
             }
 
             DB::table('wallet_transactions')->where('id', $txId)->update($update);
@@ -837,15 +841,105 @@ class LibelulaPaymentService
         return (strlen($doc) > 9) ? 'NIT' : 'CI';
     }
 
-    private function markFailed(int $txId, array $payload): void
+    /**
+     * Issues (or retries) the invoice stored in a transaction's metadata['invoice_request'].
+     *
+     * The request always reuses the same identificador, so a retry after an error or timeout
+     * cannot create a second debt/invoice in Libélula: if the first attempt was registered,
+     * Libélula answers "ya existe" (error 2), which createPayment treats as success.
+     * A failure never deletes or fails the sale: it leaves invoice_state = UNCERTAIN for review.
+     */
+    public function issueStoredInvoice(WalletTransaction $tx): array
     {
+        $tx->refresh();
+        $metadata = $tx->metadata ?? [];
+        $request = $metadata['invoice_request'] ?? null;
+
+        if (!is_array($request) || empty($request['identifier'])) {
+            return ['success' => false, 'message' => 'El movimiento no tiene una factura pendiente registrada.'];
+        }
+
+        if (($metadata['invoice_state'] ?? null) === self::INVOICE_ISSUED) {
+            return ['success' => true, 'already_issued' => true, 'invoice_url' => $tx->invoice_url];
+        }
+
+        $wallet = $tx->wallet ?? Wallet::find($tx->wallet_id);
+        if (!$wallet) {
+            $this->setInvoiceState($tx->id, self::INVOICE_UNCERTAIN, 'Billetera no encontrada');
+            return ['success' => false, 'message' => 'Billetera no encontrada'];
+        }
+
+        $result = $this->createPayment($wallet, (float) $request['amount'], $request['description'] ?? null, [
+            'emite_factura' => true,
+            'internal_usage_tx' => true,
+            'transaction_id' => $tx->id,
+            'identificador' => $request['identifier'],
+            'line_items' => $request['line_items'] ?? [],
+            'is_credit' => (bool) ($request['is_credit'] ?? false),
+            'vehicle_plate' => $request['vehicle_plate'] ?? null,
+            'preserve_on_failure' => true,
+        ], (bool) ($request['is_paid'] ?? false), (float) ($request['discount'] ?? 0));
+
+        if ($result['success']) {
+            $this->setInvoiceState($tx->id, self::INVOICE_ISSUED);
+        } else {
+            $this->setInvoiceState($tx->id, self::INVOICE_UNCERTAIN, $result['detail'] ?? $result['message'] ?? 'Error desconocido');
+        }
+
+        return $result;
+    }
+
+    private function setInvoiceState(int $txId, string $state, ?string $error = null): void
+    {
+        DB::transaction(function () use ($txId, $state, $error) {
+            $tx = DB::table('wallet_transactions')->where('id', $txId)->lockForUpdate()->first();
+            if (!$tx) {
+                return;
+            }
+
+            $metadata = json_decode($tx->metadata ?? '{}', true) ?: [];
+            $metadata['invoice_state'] = $state;
+            $metadata['invoice_attempts'] = (int) ($metadata['invoice_attempts'] ?? 0) + 1;
+            $metadata['invoice_last_attempt_at'] = now()->toIso8601String();
+            if ($error !== null) {
+                $metadata['invoice_error'] = $error;
+            } else {
+                unset($metadata['invoice_error']);
+            }
+
+            DB::table('wallet_transactions')->where('id', $txId)->update([
+                'metadata' => json_encode($metadata),
+                'updated_at' => now(),
+            ]);
+        });
+    }
+
+    /**
+     * A failed call to Libélula does not prove that nothing was registered there (timeouts,
+     * SIAT outages). Callers that pass preserve_on_failure keep the transaction as it was and
+     * only record the error; the rest keep the previous behaviour of marking it FAILED.
+     * In both cases the existing metadata (line items, skip_wallet_update, ...) is preserved.
+     */
+    private function recordFailure(?int $txId, array $payload, array $invoiceData): void
+    {
+        if (!$txId) {
+            return;
+        }
+
+        $tx = DB::table('wallet_transactions')->where('id', $txId)->first();
+        if (!$tx) {
+            return;
+        }
+
         $update = ['updated_at' => now()];
 
-        if (Schema::hasColumn('wallet_transactions', 'status')) {
+        if (!($invoiceData['preserve_on_failure'] ?? false) && Schema::hasColumn('wallet_transactions', 'status')) {
             $update['status'] = 'FAILED';
         }
         if (Schema::hasColumn('wallet_transactions', 'metadata')) {
-            $update['metadata'] = json_encode(['error' => $payload]);
+            $metadata = json_decode($tx->metadata ?? '{}', true) ?: [];
+            $metadata['error'] = $payload;
+            $update['metadata'] = json_encode($metadata);
         }
 
         DB::table('wallet_transactions')->where('id', $txId)->update($update);
