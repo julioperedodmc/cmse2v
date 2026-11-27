@@ -295,8 +295,6 @@ class WalletController extends Controller
             ['balance' => 0, 'currency' => 'BOB', 'is_postpaid' => false, 'credit_limit' => 0]
         );
 
-        \Illuminate\Support\Facades\Log::error('DEBUG: LIBELULA START', ['amount' => $request->input('amount'), 'user_id' => $user->id]);
-
         $settings = \App\Models\SystemSetting::get();
         $rechargeProduct = $settings->product_recharge_id ? \App\Models\Product::find($settings->product_recharge_id) : null;
         $defaultDescription = $rechargeProduct?->name ?? 'Recarga de Saldo';
