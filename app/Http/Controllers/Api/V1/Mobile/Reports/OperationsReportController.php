@@ -100,6 +100,7 @@ class OperationsReportController extends Controller
             ->select('charging_sessions.*')
             ->selectRaw('IFNULL(NULLIF(connectors.type, ""), "Desconocido") as mapped_connector_type')
             ->orderBy('charging_sessions.start_time', 'desc')
+            ->limit(1000)
             ->get()
             ->map(function ($s) {
                 // 1. Extraer placa directamente si existe en la sesión
@@ -180,5 +181,113 @@ class OperationsReportController extends Controller
         });
 
         return response()->json($response);
+    }
+
+    /**
+     * Endpoint: Exportar TODAS las sesiones del rango a CSV / Excel sin límites
+     */
+    public function exportCsv(Request $request)
+    {
+        $baseQuery = ChargingSession::query()->whereIn('charging_sessions.status', ['Completed', 'Failed']);
+        $this->applyFilters($baseQuery, $request);
+
+        $eagerRelations = ['station', 'user.vehicles', 'rfidTag.user.vehicles'];
+        if (method_exists(ChargingSession::class, 'vehicle')) {
+            $eagerRelations[] = 'vehicle';
+        }
+
+        $fileName = 'Operaciones_de_Cargas_' . date('Ymd_His') . '.csv';
+
+        $headers = [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => "attachment; filename=\"{$fileName}\"",
+            'Pragma' => 'no-cache',
+            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
+            'Expires' => '0',
+        ];
+
+        return response()->stream(function () use ($baseQuery, $eagerRelations) {
+            $handle = fopen('php://output', 'w');
+            
+            // UTF-8 BOM para que Excel en español lo abra correctamente con tildes y caracteres especiales
+            fprintf($handle, chr(0xEF).chr(0xBB).chr(0xBF));
+
+            // Encabezados usando separador punto y coma (;) estándar en Excel español/latinoamérica
+            fputcsv($handle, [
+                'ID Sesión',
+                'Fecha de Inicio',
+                'Estación',
+                'Conector',
+                'Cliente',
+                'Placa',
+                'Energía (kWh)',
+                'Costo Energía (BOB)',
+                'Fee Parqueo Lista (BOB)',
+                'Descuento Fee (BOB)',
+                'Fee Parqueo Neto (BOB)',
+                'Monto Total (BOB)',
+                'Estado',
+                'Motivo de Corte',
+            ], ';');
+
+            // Procesamiento en lotes de 500 para rendimiento óptimo sin saturar memoria
+            $query = (clone $baseQuery)
+                ->with($eagerRelations)
+                ->leftJoin('connectors', 'charging_sessions.connector_id', '=', 'connectors.id')
+                ->select('charging_sessions.*')
+                ->selectRaw('IFNULL(NULLIF(connectors.type, ""), "Desconocido") as mapped_connector_type')
+                ->orderBy('charging_sessions.start_time', 'desc');
+
+            $query->chunk(500, function ($sessions) use ($handle) {
+                foreach ($sessions as $s) {
+                    $plate = $s->vehicle_plate ?? $s->plate ?? $s->license_plate ?? $s->placa ?? null;
+                    if (!$plate && isset($s->vehicle) && $s->vehicle) {
+                        $plate = $s->vehicle->plate ?? $s->vehicle->license_plate ?? $s->vehicle->placa ?? null;
+                    }
+                    if (!$plate && $s->user && $s->user->vehicles && $s->user->vehicles->isNotEmpty()) {
+                        $plates = $s->user->vehicles->map(fn($v) => $v->plate ?? $v->license_plate ?? $v->placa ?? null)->filter()->unique()->values();
+                        if ($plates->isNotEmpty()) {
+                            $plate = $plates->implode(', ');
+                        }
+                    }
+                    if (!$plate && $s->rfidTag && $s->rfidTag->user && $s->rfidTag->user->vehicles && $s->rfidTag->user->vehicles->isNotEmpty()) {
+                        $plates = $s->rfidTag->user->vehicles->map(fn($v) => $v->plate ?? $v->license_plate ?? $v->placa ?? null)->filter()->unique()->values();
+                        if ($plates->isNotEmpty()) {
+                            $plate = $plates->implode(', ');
+                        }
+                    }
+                    if (empty($plate)) {
+                        $plate = 'S/P';
+                    }
+
+                    $startLocal = $s->start_time ? \Carbon\Carbon::parse($s->start_time)->setTimezone('America/La_Paz')->toDateTimeString() : '-';
+                    $rawFee = (float) ($s->session_fee ?? 0);
+                    $discount = (float) ($s->discount_amount ?? 0);
+                    $feeDiscount = min($discount, $rawFee);
+                    $netFee = max(0.0, $rawFee - $feeDiscount);
+                    $totalCost = (float) $s->total_cost;
+                    $energyCost = (float) ($s->energy_cost ?? ($totalCost - $netFee));
+
+                    fputcsv($handle, [
+                        'CS-' . ($s->id ?: $s->transaction_id),
+                        $startLocal,
+                        $s->station?->name ?? 'N/A',
+                        $s->mapped_connector_type ?? 'Desconocido',
+                        $s->user?->name ?? 'Anónimo/Card',
+                        $plate,
+                        number_format((float) $s->total_energy_kwh, 2, '.', ''),
+                        number_format($energyCost, 2, '.', ''),
+                        number_format($rawFee, 2, '.', ''),
+                        number_format($feeDiscount, 2, '.', ''),
+                        number_format($netFee, 2, '.', ''),
+                        number_format($totalCost, 2, '.', ''),
+                        $s->status === 'Completed' ? 'Completada' : 'Fallida',
+                        $s->stop_reason ?: '-',
+                    ], ';');
+                }
+            });
+
+            fclose($handle);
+        }, 200, $headers);
     }
 }

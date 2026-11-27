@@ -50,6 +50,7 @@ Route::prefix('v1/mobile')->group(function () {
         Route::get('/executive-summary', [ExecutiveSummaryReportController::class, 'getExecutiveSummary']);
         Route::get('/aetn-billing', [AetnBillingReportController::class, 'getAetnBilling']);
         Route::get('/operations', [OperationsReportController::class, 'getOperations']);
+        Route::get('/operations/export', [OperationsReportController::class, 'exportCsv']);
         Route::get('/client-balances', [ClientBalancesReportController::class, 'getClientBalances']);
         Route::get('/rfid-dealerships', [RfidDealershipsReportController::class, 'getRfidDealerships']);
         Route::get('/vehicles', [VehicleReportController::class, 'getVehicleReports']);

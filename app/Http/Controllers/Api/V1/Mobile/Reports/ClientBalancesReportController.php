@@ -112,9 +112,7 @@ class ClientBalancesReportController extends Controller
                     ->where('email', 'NOT LIKE', '%@evce.temp');
             });
 
-        if ($startDate || $endDate) {
-            // Prioridad a rango de fechas libre
-        } elseif ($month) {
+        if ($month) {
             $carbonMonth = Carbon::parse($month . '-01');
             $startDate = $carbonMonth->startOfMonth()->toDateString();
             $endDate = $carbonMonth->endOfMonth()->toDateString();
