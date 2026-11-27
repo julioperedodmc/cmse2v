@@ -54,7 +54,15 @@ class WalletController extends Controller
             ['balance' => 0, 'currency' => 'BOB', 'is_postpaid' => false, 'credit_limit' => 0]
         );
 
-        if ($this->verifyRecentLibelulaPayments($wallet->id)) {
+        $latestPending = DB::table('wallet_transactions')
+            ->where('wallet_id', $wallet->id)
+            ->where('status', 'PENDING')
+            ->where('payment_method', 'LIBELULA')
+            ->where('created_at', '>=', now()->subMinutes(self::LIBELULA_STATUS_WINDOW_MINUTES))
+            ->orderByDesc('id')
+            ->first();
+
+        if ($latestPending && $this->verifyPendingRechargeOnce($latestPending)) {
             $wallet->refresh();
         }
 
@@ -75,58 +83,56 @@ class WalletController extends Controller
         ]);
     }
 
-    private const LIBELULA_VERIFY_WINDOW_MINUTES = 120;
-    private const LIBELULA_VERIFY_MAX_PER_REQUEST = 2;
+    private const LIBELULA_STATUS_WINDOW_MINUTES = 30;
+    private const LIBELULA_STATUS_INTERVAL_SECONDS = 60;
+    private const LIBELULA_STATUS_MAX_CHECKS = 10;
     private const LIBELULA_SLOW_CALL_SECONDS = 5;
     private const LIBELULA_DOWN_CACHE_KEY = 'libelula:verify:down';
     private const LIBELULA_DOWN_SECONDS = 120;
 
     /**
-     * Confirms the wallet's most recent pending Libélula recharges so the app shows them
-     * right after paying. Loading the balance must never wait on Libélula: only recharges
-     * from the last two hours are checked, at most two per request, and after a slow call
-     * (Libélula unreachable) checks are skipped for a couple of minutes. Older pending
-     * recharges are left to the webhook.
+     * Libélula confirms payments through its callback and blocks clients that poll its
+     * status endpoint (it blocked our IP on 2026-11-26 after ~2,700 queries/hour). Until its
+     * callbacks reach us, only the wallet's latest pending recharge is checked, when the
+     * user loads the balance or comes back to the app after paying: at most once per
+     * minute, only during its first 30 minutes and at most 10 times in total, so a payment
+     * costs Libélula at most 10 queries however often the app reloads.
      *
-     * Returns true when at least one recharge was confirmed.
+     * Returns true when Libélula confirmed the payment.
      */
-    private function verifyRecentLibelulaPayments(int $walletId): bool
+    private function verifyPendingRechargeOnce(object $tx): bool
     {
         if (Cache::has(self::LIBELULA_DOWN_CACHE_KEY)) {
             return false;
         }
 
-        $pendingIds = DB::table('wallet_transactions')
-            ->where('wallet_id', $walletId)
-            ->where('status', 'PENDING')
-            ->where('payment_method', 'LIBELULA')
-            ->where('created_at', '>=', now()->subMinutes(self::LIBELULA_VERIFY_WINDOW_MINUTES))
-            ->orderByDesc('id')
-            ->limit(self::LIBELULA_VERIFY_MAX_PER_REQUEST)
-            ->pluck('id');
-
-        if ($pendingIds->isEmpty()) {
+        $createdAt = $tx->created_at ? \Illuminate\Support\Carbon::parse($tx->created_at) : null;
+        if (!$createdAt || $createdAt->lt(now()->subMinutes(self::LIBELULA_STATUS_WINDOW_MINUTES))) {
             return false;
         }
 
-        $libelula = app(LibelulaPaymentService::class);
-        $confirmed = false;
+        if (!Cache::add("libelula:status:{$tx->id}", true, self::LIBELULA_STATUS_INTERVAL_SECONDS)) {
+            return false;
+        }
 
-        foreach ($pendingIds as $txId) {
-            $startedAt = microtime(true);
-            $confirmed = $libelula->verifyStatus((int) $txId) || $confirmed;
+        $countKey = "libelula:status-count:{$tx->id}";
+        Cache::add($countKey, 0, now()->addMinutes(self::LIBELULA_STATUS_WINDOW_MINUTES + 5));
+        if (Cache::increment($countKey) > self::LIBELULA_STATUS_MAX_CHECKS) {
+            return false;
+        }
 
-            if (microtime(true) - $startedAt >= self::LIBELULA_SLOW_CALL_SECONDS) {
-                $this->markLibelulaDown('verification', ['tx_id' => $txId]);
-                break;
-            }
+        $startedAt = microtime(true);
+        $confirmed = app(LibelulaPaymentService::class)->verifyStatus((int) $tx->id);
+
+        if (microtime(true) - $startedAt >= self::LIBELULA_SLOW_CALL_SECONDS) {
+            $this->markLibelulaDown('verification', ['tx_id' => $tx->id]);
         }
 
         return $confirmed;
     }
 
     /**
-     * After a slow call to Libélula (unreachable), balance checks are skipped and new
+     * After a slow call to Libélula (unreachable), status checks are skipped and new
      * recharges are refused with a clear notice for a couple of minutes, instead of making
      * users wait ~10 s for a checkout that fails anyway.
      */
@@ -354,8 +360,7 @@ class WalletController extends Controller
         $status = $statusCol ? (string) ($tx->{$statusCol} ?? 'PENDING') : 'PENDING';
 
         if (strtoupper($status) === 'PENDING') {
-            $libelula = app(\App\Services\LibelulaPaymentService::class);
-            if ($libelula->verifyStatus($transactionId)) {
+            if ($this->verifyPendingRechargeOnce($tx)) {
                 $tx = DB::table('wallet_transactions')->where('id', $transactionId)->first();
                 $status = $statusCol ? (string) ($tx->{$statusCol} ?? 'COMPLETED') : 'COMPLETED';
             }
