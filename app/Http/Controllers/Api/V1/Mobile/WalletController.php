@@ -117,16 +117,31 @@ class WalletController extends Controller
             $confirmed = $libelula->verifyStatus((int) $txId) || $confirmed;
 
             if (microtime(true) - $startedAt >= self::LIBELULA_SLOW_CALL_SECONDS) {
-                Cache::put(self::LIBELULA_DOWN_CACHE_KEY, true, self::LIBELULA_DOWN_SECONDS);
-                Log::warning('Libelula: verification is slow, skipping balance checks for a while', [
-                    'tx_id' => $txId,
-                    'seconds' => round(microtime(true) - $startedAt, 1),
-                ]);
+                $this->markLibelulaDown('verification', ['tx_id' => $txId]);
                 break;
             }
         }
 
         return $confirmed;
+    }
+
+    /**
+     * After a slow call to Libélula (unreachable), balance checks are skipped and new
+     * recharges are refused with a clear notice for a couple of minutes, instead of making
+     * users wait ~10 s for a checkout that fails anyway.
+     */
+    private function markLibelulaDown(string $context, array $extra = []): void
+    {
+        Cache::put(self::LIBELULA_DOWN_CACHE_KEY, true, self::LIBELULA_DOWN_SECONDS);
+        Log::warning("Libelula: slow {$context}, pausing checks and recharges for a while", $extra);
+    }
+
+    private function rechargeUnavailableResponse()
+    {
+        return response()->json([
+            'message' => 'Las recargas no están disponibles temporalmente. Por favor, intenta nuevamente en unos minutos.',
+            'status' => 'recharge_unavailable',
+        ], 503);
     }
 
     public function updateTag(Request $request, RfidTag $tag)
@@ -250,6 +265,10 @@ class WalletController extends Controller
             'amount.min' => 'El monto mínimo para recarga con Libélula es Bs 1.00',
         ]);
 
+        if (Cache::has(self::LIBELULA_DOWN_CACHE_KEY)) {
+            return $this->rechargeUnavailableResponse();
+        }
+
         $user = $request->user();
 
         $documento = $request->input('documento') ?: $user->billing_document;
@@ -282,6 +301,7 @@ class WalletController extends Controller
         $rechargeProduct = $settings->product_recharge_id ? \App\Models\Product::find($settings->product_recharge_id) : null;
         $defaultDescription = $rechargeProduct?->name ?? 'Recarga de Saldo';
 
+        $startedAt = microtime(true);
         $result = $libelula->createPayment(
             $wallet,
             round((float) $request->input('amount'), 2),
@@ -295,6 +315,11 @@ class WalletController extends Controller
         );
 
         if (!($result['success'] ?? false)) {
+            if (microtime(true) - $startedAt >= self::LIBELULA_SLOW_CALL_SECONDS) {
+                $this->markLibelulaDown('checkout', ['transaction_id' => $result['transaction_id'] ?? null]);
+                return $this->rechargeUnavailableResponse();
+            }
+
             return response()->json([
                 'message' => $result['message'] ?? 'No se pudo crear el pago',
                 'detail' => $result['detail'] ?? null,
